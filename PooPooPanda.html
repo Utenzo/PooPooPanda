@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-  <title>Poo Poo Panda — Single-file (spacchettabile)</title>
+  <title>Poo Poo Panda — Single-file (versione base + nuove feature)</title>
   <style>
     html, body { margin:0; padding:0; height:100%; background:#0d1117; }
     body { font-family: 'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji', system-ui, Arial, sans-serif; }
@@ -18,36 +18,35 @@
   <div id="audio-gate" class="audio-unlock"><button id="audio-btn">🔈 Tocca per attivare audio</button></div>
   <div class="hint">Tocco/click per muovere • SPAZIO: 💩 • N: 🐋 • S: 🧜‍♀️ • T: 🌀</div>
 
-  <!-- Phaser UMD (global window.Phaser) -->
+  <!-- Phaser UMD -->
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.87.0/dist/phaser.min.js"></script>
 
-  <!-- Gioco integrato in un solo <script> (modulare e facilmente spacchettabile) -->
   <script type="module">
   /*
-   * Poo Poo Panda — Single-file bundle (spacchettabile)
-   * ---------------------------------------------------
-   * Come suddividere in moduli se serve:
-   *   - domain         -> blocco // DOMAIN
-   *   - sfx            -> blocco // SFX (audio)
-   *   - ui             -> blocco // UI (componenti grafici)
-   *   - textures       -> blocco // TEXTURES
-   *   - limbs          -> blocco // LIMBS
-   *   - scenes         -> blocco // SCENES (Menu/Land/Sea/Lose/Win)
-   *   - boot/main      -> blocco // BOOT
+   * Poo Poo Panda — Single-file (spacchettabile)
+   * Base: versione precedente stabile (senza overlay Pausa/Impostazioni, né mission timer).
+   * Modifiche richieste incluse:
+   * 1) Barra Pupù spostata in alto a destra (anche in mare) + nuova barra “Mal di pancia”.
+   * 2) Fase Terra: sconfitta per “aver mangiato troppo” (Pupù=100%) con messaggio corretto.
+   * 3) Fase Terra: “Mal di pancia” sale mangiando cibi non adatti; a 100% sconfitta con stesso messaggio.
+   * 4) Menu: contrasto selezione migliorato + anteprime che cambiano al cambio genere.
+   * 5) Fase Terra: nella fascia azzurra “mare” il personaggio “nuota” (velocità ridotta + effetto 💦); su sabbia cammina.
+   * 6) Fase Mare: scena con fascia di spiaggia in basso; la 💩 si arena lì (resta, non “scivola via”).
+   * 7) Fase Mare: il personaggio può camminare sulla spiaggia e raccogliere “Bonus Granchio”.
+   * 8) Fase Mare: granchietti 🦀 sulla sabbia con piccoli coni visivi: se vedono la 💩 → sconfitta; dopo il bonus, diventano amici e mangiano la 💩 (come i narvali).
    */
+
   const Phaser = window.Phaser;
   const FONT = "Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji, Arial, sans-serif";
 
-  // =====================================
-  // DOMAIN
-  // =====================================
+  // ========== DOMAIN ==========
   const Characters = {
     PANDA_PICCOLO: { specie: 'panda', eta: 'piccolo' },
     PANDA_ADULTO:  { specie: 'panda', eta: 'adulto'  },
     BAMBINO:       { specie: 'umano', eta: 'piccolo' },
     ADULTO:        { specie: 'umano', eta: 'adulto'  }
   };
-  const Foods = { BAMBOO: 'bamboo', PASTA: 'pasta', PIZZA: 'pizza', GELATO: 'gelato' };
+  const Foods = { BAMBOO: 'bamboo', PASTA: 'pasta', PIZZA: 'pizza', GELATO: 'gelato' }; // gelato = “ok-ish” (non fa male)
   function allowedFoodsFor(character){
     if (character.specie === 'panda') return new Set([Foods.BAMBOO]);
     if (character.specie === 'umano' && character.eta === 'piccolo') return new Set([Foods.PASTA]);
@@ -57,11 +56,12 @@
   function poopGain(character, food){
     const allowed = allowedFoodsFor(character);
     if (allowed.has(food)) return 0.18;
-    if (food === Foods.GELATO) return 0.06;
-    return 0.00;
+    if (food === Foods.GELATO) return 0.06; // un po' di “carica” extra
+    return 0.00; // cibo non adatto → niente “poop”, ma farà salire “mal di pancia”
   }
   function defaultRng(){ return { int(min, max){ return Math.floor(Math.random()*(max-min+1)) + min; } }; }
   function randomPointAvoiding(center, minDist, bounds, rng = defaultRng()){
+    // spawn point “lontano abbastanza” dal player
     const maxTry = 50;
     for (let i=0;i<maxTry;i++){
       const x = rng.int(bounds.xMin, bounds.xMax);
@@ -79,19 +79,24 @@
     diff = Math.atan2(Math.sin(diff), Math.cos(diff));
     return Math.abs(diff) <= fovRad/2;
   }
+
   const GameState = {
-    selected: { specie: 'panda', eta: 'piccolo', genere: 'm' },
-    poopMeter: 0,
+    selected:   { specie: 'panda', eta: 'piccolo', genere: 'm' },
+    poopMeter:  0,   // 0..1
+    stomach:    0,   // 0..1 (nuova barra “mal di pancia”)
     hasNarwhal: false,
-    hasSiren: false,
+    hasSiren:   false,
     hasTornado: false,
+    crabsFriendly: false, // dopo il bonus granchio diventano amici
     transitioning: false
   };
   function resetForNewRun(){
     GameState.poopMeter = 0;
+    GameState.stomach   = 0;
     GameState.hasNarwhal = false;
-    GameState.hasSiren = false;
+    GameState.hasSiren   = false;
     GameState.hasTornado = false;
+    GameState.crabsFriendly = false;
     GameState.transitioning = false;
   }
   function labelForFood(foodType){
@@ -113,12 +118,10 @@
     }
   }
 
-  // =====================================
-  // SFX (audio WebAudio minimalista)
-  // =====================================
+  // ========== SFX ==========
   let _audioCtx = null;
   function ensureAudioContext(){ if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)(); return _audioCtx; }
-  function tone({ freq=440, dur=0.12, type='sine', vol=0.2 }){
+  function tone({ freq=440, dur=0.12, type='sine', vol=0.22 }){
     const ctx = ensureAudioContext();
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
@@ -136,21 +139,20 @@
     narwhal(){ this.play(400,0.10,'sine',0.2); this.play(300,0.20,'triangle',0.15); },
     siren(){ this.play(900,0.08,'square',0.2); this.play(700,0.12,'square',0.2); },
     tornado(){ this.play(120,0.3,'sawtooth',0.2); },
+    crab(){ this.play(760,0.06,'square',0.22); this.play(640,0.08,'triangle',0.18); }, // bonus granchi
     win(){ [523,659,783].forEach((f,i)=>setTimeout(()=>this.play(f,0.12,'sine',0.22), i*120)); },
     lose(){ [196,185,174].forEach((f,i)=>setTimeout(()=>this.play(f,0.12,'triangle',0.22), i*120)); },
     button(){ this.play(540,0.08,'sine',0.22); }
   };
 
-  // =====================================
-  // UI
-  // =====================================
-  function drawProgressBar(graphics, x, y, w, h, progress){
+  // ========== UI helpers ==========
+  function drawProgressBar(graphics, x, y, w, h, progress, fillColor=0x9b5a1a){
     graphics.lineStyle(2, 0x222222, 1);
     graphics.strokeRoundedRect(x, y, w, h, 8);
     graphics.fillStyle(0x333333, 1);
     graphics.fillRoundedRect(x, y, w, h, 8);
     const innerPad = 4, iw = (w - innerPad*2) * Math.max(0, Math.min(1, progress));
-    graphics.fillStyle(0x9b5a1a, 1);
+    graphics.fillStyle(fillColor, 1);
     graphics.fillRoundedRect(x + innerPad, y + innerPad, iw, h - innerPad*2, 6);
   }
   function makeBamboo(scene, x, baseY, totalH){
@@ -170,9 +172,7 @@
     return c;
   }
 
-  // =====================================
-  // TEXTURES
-  // =====================================
+  // ========== TEXTURES ==========
   function drawBow(g, cx, cy, col=0xff3da7){ g.fillStyle(col,1); g.fillEllipse(cx-6,cy,8,10); g.fillEllipse(cx+6,cy,8,10); g.fillCircle(cx,cy,3); }
   function drawCap(g, cx, cy, col=0x1f4d7a){ g.fillStyle(col,1); g.fillEllipse(cx,cy,26,12); g.fillRect(cx-13, cy, 26, 5); }
   function drawGlasses(g, cx, cy){ g.lineStyle(2,0x000000,1); g.strokeCircle(cx-8,cy,6); g.strokeCircle(cx+8,cy,6); g.lineBetween(cx-2,cy, cx+2,cy); }
@@ -222,9 +222,7 @@
     g.generateTexture(key, pad*2+r*2, pad*2+r*2+18); g.destroy();
   }
 
-  // =====================================
-  // LIMBS
-  // =====================================
+  // ========== LIMBS ==========
   function makeLimbs(scene, color=0x000000){
     const parts = ['LA','RA','LL','RL'].reduce((acc,k)=>{ acc[k]=scene.add.graphics(); return acc; },{});
     const draw = (g,x,y,rot)=>{ g.clear(); g.fillStyle(color,1); g.save(); g.translateCanvas(x,y); g.rotateCanvas(rot); g.fillRoundedRect(-2,-8,4,16,2); g.restore(); };
@@ -238,70 +236,87 @@
     limbs.draw(limbs.parts.RL, px+8,  py+20,  s*amp);
   }
 
-  // =====================================
-  // SCENES
-  // =====================================
+  // ========== SCENES ==========
   class MenuScene extends Phaser.Scene {
     constructor(){ super('MenuScene'); }
     create(){
       resetForNewRun();
       const { width, height } = this.scale;
+
+      // Sfondo “spiaggia + mare” come prima
       const bg = this.add.graphics();
-      bg.fillStyle(0x0b3d91,1); bg.fillRect(0,0,width,height*0.35);
-      bg.fillStyle(0x1976d2,1); bg.fillRect(0,height*0.35,width,height*0.25);
-      bg.fillStyle(0xf4e2b5,1); bg.fillRect(0,height*0.60,width,height*0.40);
+      bg.fillStyle(0x0b3d91,1); bg.fillRect(0,0,width,height*0.35);      // cielo
+      bg.fillStyle(0x1976d2,1); bg.fillRect(0,height*0.35,width,height*0.25); // mare
+      bg.fillStyle(0xf4e2b5,1); bg.fillRect(0,height*0.60,width,height*0.40); // sabbia
       makeBamboo(this, 54, height-20, height*0.75);
       makeBamboo(this, width-54, height-20, height*0.68);
+
       const title = this.add.text(width/2, 60, 'Poo Poo Panda', { fontFamily: FONT, fontSize: 54, color:'#ffffff' }).setOrigin(0.5);
       title.setShadow(3,3,'#000000',6,true,true);
-      const mascotKey = 'mascot_panda';
-      if (!this.textures.exists(mascotKey)) createCharacterTexture(this, mascotKey, { specie:'panda', eta:'adulto', genere:'f' });
-      this.add.image(width/2 + 240, 115, mascotKey).setScale(1.6);
+
       const panelW = Math.min(720, width-60), panelH = 300;
       const panel = this.add.graphics();
-      panel.fillStyle(0x1b2838, 0.92); panel.fillRoundedRect((width-panelW)/2, 150, panelW, panelH, 20);
-      panel.lineStyle(2, 0x90caf9, 1); panel.strokeRoundedRect((width-panelW)/2, 150, panelW, panelH, 20);
+      panel.fillStyle(0x1b2838, 0.95); panel.fillRoundedRect((width-panelW)/2, 150, panelW, panelH, 20);
+      panel.lineStyle(3, 0x64b5f6, 1.0); panel.strokeRoundedRect((width-panelW)/2, 150, panelW, panelH, 20);
       this.add.text(width/2, 165, 'Scegli il personaggio e il genere', { fontFamily: FONT, fontSize: 22, color:'#e3f2fd' }).setOrigin(0.5);
+
       const options = [
-        { label: 'Panda piccolo', value: Characters.PANDA_PICCOLO, preview:{specie:'panda',eta:'piccolo',genere:'m'} },
-        { label: 'Panda adulto',  value: Characters.PANDA_ADULTO,  preview:{specie:'panda',eta:'adulto',genere:'m'} },
-        { label: 'Bambino umano', value: Characters.BAMBINO,       preview:{specie:'umano',eta:'piccolo',genere:'m'} },
-        { label: 'Adulto umano',  value: Characters.ADULTO,        preview:{specie:'umano',eta:'adulto',genere:'m'} },
+        { label: 'Panda piccolo', value: Characters.PANDA_PICCOLO },
+        { label: 'Panda adulto',  value: Characters.PANDA_ADULTO  },
+        { label: 'Bambino umano', value: Characters.BAMBINO       },
+        { label: 'Adulto umano',  value: Characters.ADULTO        },
       ];
-      const cards = []; let selectedIdx = 0; const startX = (width-panelW)/2 + 28; const startY = 205; const gapX = (panelW-56)/4; const cardW = gapX-14; const cardH = 110;
+      const cards = []; let selectedIdx = 0; let gender = 'm';
+      const startX = (width-panelW)/2 + 28; const startY = 205; const gapX = (panelW-56)/4; const cardW = gapX-14; const cardH = 110;
+
       const makeCard = (i)=>{
         const x = startX + i*gapX; const y = startY; const c = this.add.container(x, y);
         const g = this.add.graphics(); c.add(g);
-        g.fillStyle(0x102131,1); g.fillRoundedRect(0,0,cardW,cardH,16); g.lineStyle(2,0x5dade2,1); g.strokeRoundedRect(0,0,cardW,cardH,16);
-        const opt = options[i];
-        const k = `menu_prev_${i}`; if (!this.textures.exists(k)) createCharacterTexture(this, k, opt.preview);
-        const img = this.add.image(cardW/2, 46, k).setScale(0.9); c.add(img);
-        const txt = this.add.text(cardW/2, cardH-20, opt.label, { fontFamily: FONT, fontSize: 16, color:'#e3f2fd' }).setOrigin(0.5); txt.setShadow(2,2,'#000',4,true,true); c.add(txt);
+        const k = ()=>`menu_prev_${i}_${gender}`;
+        const drawCardBG = (active=false)=>{
+          g.clear();
+          if (active){ g.fillStyle(0x143d5b,1); g.fillRoundedRect(0,0,cardW,cardH,16); g.lineStyle(3,0x64b5f6,1); g.strokeRoundedRect(0,0,cardW,cardH,16); }
+          else       { g.fillStyle(0x102131,1); g.fillRoundedRect(0,0,cardW,cardH,16); g.lineStyle(2,0x5dade2,1); g.strokeRoundedRect(0,0,cardW,cardH,16); }
+        };
+        drawCardBG(i===selectedIdx);
+
+        const ensureTex = ()=>{
+          if (!this.textures.exists(k())) createCharacterTexture(this, k(), { ...options[i].value, genere: gender });
+        };
+        ensureTex();
+        const img = this.add.image(cardW/2, 46, k()).setScale(0.9); c.add(img);
+        const txt = this.add.text(cardW/2, cardH-20, options[i].label, { fontFamily: FONT, fontSize: 16, color:'#e3f2fd' }).setOrigin(0.5); txt.setShadow(2,2,'#000',4,true,true); c.add(txt);
+
         c.setSize(cardW, cardH);
         c.setInteractive(new Phaser.Geom.Rectangle(0,0,cardW,cardH), Phaser.Geom.Rectangle.Contains)
-          .on('pointerover', ()=>{ g.clear(); g.fillStyle(0x0f2a3f,1); g.fillRoundedRect(0,0,cardW,cardH,16); g.lineStyle(2,0x90caf9,1); g.strokeRoundedRect(0,0,cardW,cardH,16); })
-          .on('pointerout', ()=>{ if (selectedIdx!==i){ g.clear(); g.fillStyle(0x102131,1); g.fillRoundedRect(0,0,cardW,cardH,16); g.lineStyle(2,0x5dade2,1); g.strokeRoundedRect(0,0,cardW,cardH,16);} })
-          .on('pointerdown', ()=>{ SFX.button(); selectedIdx=i; refreshCards(); });
-        cards.push({c,g,img,txt});
+          .on('pointerover', ()=> drawCardBG(true))
+          .on('pointerout',  ()=> drawCardBG(i===selectedIdx))
+          .on('pointerdown', ()=>{ SFX.button(); selectedIdx=i; cards.forEach((card, idx)=>card.drawBG(idx===selectedIdx)); });
+
+        cards.push({c,g,img,txt,drawBG:drawCardBG, refreshTexture:()=>{ ensureTex(); img.setTexture(k()); }});
       };
       for (let i=0;i<options.length;i++) makeCard(i);
-      const refreshCards = ()=>{
-        cards.forEach((card, i)=>{
-          card.g.clear();
-          if (i===selectedIdx){ card.g.fillStyle(0x143d5b,1); card.g.fillRoundedRect(0,0,cardW,cardH,16); card.g.lineStyle(3,0x64b5f6,1); card.g.strokeRoundedRect(0,0,cardW,cardH,16); }
-          else { card.g.fillStyle(0x102131,1); card.g.fillRoundedRect(0,0,cardW,cardH,16); card.g.lineStyle(2,0x5dade2,1); card.g.strokeRoundedRect(0,0,cardW,cardH,16); }
-        });
-      };
-      refreshCards();
-      let gender = 'm';
+
       const pillW = 220, pillH = 40; const pillX = width/2 - pillW/2, pillY = 325;
       const pill = this.add.graphics();
-      const drawPill = ()=>{ pill.clear(); pill.fillStyle(0x102131,1); pill.fillRoundedRect(pillX, pillY, pillW, pillH, 20); pill.lineStyle(2,0x90caf9,1); pill.strokeRoundedRect(pillX, pillY, pillW, pillH, 20); const knobX = gender==='m'? pillX+pillW*0.25 : pillX+pillW*0.75; pill.fillStyle(0x64b5f6,1); pill.fillRoundedRect(knobX-44, pillY+6, 88, pillH-12, 16); };
+      const drawPill = ()=>{
+        pill.clear();
+        pill.fillStyle(0x102131,1); pill.fillRoundedRect(pillX, pillY, pillW, pillH, 20);
+        pill.lineStyle(2,0x90caf9,1); pill.strokeRoundedRect(pillX, pillY, pillW, pillH, 20);
+        const knobX = gender==='m'? pillX+pillW*0.25 : pillX+pillW*0.75;
+        pill.fillStyle(0x64b5f6,1); pill.fillRoundedRect(knobX-44, pillY+6, 88, pillH-12, 16);
+      };
       drawPill();
       this.add.text(pillX+pillW*0.25, pillY+pillH/2, '♂️ Maschio', { fontFamily: FONT, fontSize:16, color:'#e3f2fd' }).setOrigin(0.5);
       this.add.text(pillX+pillW*0.75, pillY+pillH/2, '♀️ Femmina', { fontFamily: FONT, fontSize:16, color:'#e3f2fd' }).setOrigin(0.5);
-      this.add.zone(pillX, pillY, pillW, pillH).setOrigin(0).setInteractive().on('pointerdown', ()=>{ SFX.button(); gender = gender==='m' ? 'f' : 'm'; drawPill(); });
+      this.add.zone(pillX, pillY, pillW, pillH).setOrigin(0).setInteractive().on('pointerdown', ()=>{
+        SFX.button();
+        gender = gender==='m' ? 'f' : 'm'; drawPill();
+        cards.forEach(c=>c.refreshTexture()); // aggiorna anteprime al cambio genere
+      });
+
       this.add.text(width/2, height - 110, 'Consiglio: Panda→Bamboo | Bimbo→Pasta | Adulto→Pizza', { fontFamily: FONT, fontSize: 16, color: '#0b0b0b', backgroundColor:'#e3f2fd', padding:{left:10,right:10,top:4,bottom:4} }).setOrigin(0.5);
+
       const start = this.add.text(width/2, height - 60, 'Inizia ▶', { fontFamily: FONT, fontSize: 30, color: '#ffffff', backgroundColor:'#43a047', padding:{ left:18, right:18, top:8, bottom:8 } }).setOrigin(0.5);
       start.setShadow(3,3,'#1b5e20',6,true,true);
       start.setInteractive({ useHandCursor: true })
@@ -319,26 +334,52 @@
     constructor(){ super('LandScene'); }
     create(){
       GameState.transitioning = false; const { width, height } = this.scale;
+      // Sfondo: cielo + mare (fascia azzurra) + sabbia
       this.cameras.main.setBackgroundColor('#87CEEB');
-      this.bg = this.add.graphics(); this.bg.fillStyle(0xF4E2B5, 1); this.bg.fillRect(0, height*0.35, width, height*0.65);
+      this.bg = this.add.graphics();
+      this.bg.fillStyle(0x1976d2,1); this.bg.fillRect(0,height*0.35,width,height*0.25); // fascia mare
+      this.bg.fillStyle(0xF4E2B5, 1); this.bg.fillRect(0, height*0.60, width, height*0.40); // sabbia
+
       this.add.text(10, 10, `Personaggio: ${GameState.selected.specie} ${GameState.selected.eta} (${GameState.selected.genere==='m'?'M':'F'})`, { fontFamily: FONT, fontSize: 16, color: '#000' });
+
       const key = `char_${GameState.selected.specie}_${GameState.selected.eta}_${GameState.selected.genere}`; createCharacterTexture(this, key, GameState.selected);
-      this.player = this.add.image(width/2, height*0.6, key); this.physics.add.existing(this.player); this.player.body.setCircle(this.player.displayWidth/2); this.player.body.setCollideWorldBounds(true);
+      this.player = this.add.image(width/2, height*0.6, key);
+      this.physics.add.existing(this.player);
+      this.player.body.setCircle(this.player.displayWidth/2);
+      this.player.body.setCollideWorldBounds(true);
+
       this.playerLimbs = makeLimbs(this, 0x000000);
       this.foods = this.physics.add.group(); this.bonuses = this.physics.add.group();
-      this.sceneStartMs = this.time.now; this.GRACE_MS = 1000; this.EAT_COOLDOWN_MS = 180; this.lastEatMs = 0;
-      this.spawnFoodWave(); this.spawnBonusNarwhal();
-      this.ui = this.add.graphics(); this.uiText = this.add.text(width - 200, 12, 'Pupù: 0%', { fontFamily: FONT, fontSize: 16, color: '#111' });
+
+      // UI: barre in alto a DESTRA (non coprono freccia vento della scena mare)
+      this.ui = this.add.graphics();
+      this.poopText = this.add.text(0, 0, '', { fontFamily: FONT, fontSize: 14, color: '#111' }).setOrigin(1,0);
+      this.stomachText = this.add.text(0, 0, '', { fontFamily: FONT, fontSize: 14, color: '#111' }).setOrigin(1,0);
+
       this.promptText = this.add.text(width/2, 48, '', { fontFamily: FONT, fontSize: 18, color: '#111' }).setOrigin(0.5);
       this.seaBtn = this.add.text(width - 190, 42, 'Vai al Mare ▶', { fontFamily:FONT, fontSize: 18, color:'#ffffff', backgroundColor:'#0a7d33', padding:{left:10,right:10,top:6,bottom:6} }).setInteractive({ useHandCursor:true }).on('pointerdown', () => this.tryGoSea()); this.seaBtn.visible = false;
       this.restartBtn = this.add.text(16, height - 44, '⟲ Ricomincia (R)', { fontFamily:FONT, fontSize: 18, color:'#ffffff', backgroundColor:'#444', padding:{left:10,right:10,top:6,bottom:6} }).setInteractive({ useHandCursor:true }).on('pointerdown', () => this.restartLand());
-      this.tut = this.add.text(width/2, height-90, 'Mangia i cibi giusti, riempi fino al 60% e vai al mare!', { fontFamily:FONT, fontSize: 16, color:'#001', backgroundColor:'#fff', padding:{left:8,right:8,top:6,bottom:6} }).setOrigin(0.5);
-      this.time.delayedCall(4000, ()=> this.tut.setVisible(false));
-      this.cursors = this.input.keyboard.createCursorKeys(); this.wasd = this.input.keyboard.addKeys('W,A,S,D'); this.keyM = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.M); this.keyR = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R);
+
+      this.sceneStartMs = this.time.now; this.GRACE_MS = 1000; this.EAT_COOLDOWN_MS = 180; this.lastEatMs = 0;
+
+      this.spawnFoodWave(); this.spawnBonusNarwhal();
+
+      this.tut = this.add.text(width/2, height-90, 'Mangia i cibi giusti. Evita quelli sbagliati (mal di pancia). Riempi fino al 60% e vai al mare!', { fontFamily:FONT, fontSize: 16, color:'#001', backgroundColor:'#fff', padding:{left:8,right:8,top:6,bottom:6} }).setOrigin(0.5);
+      this.time.delayedCall(5000, ()=> this.tut.setVisible(false));
+
+      this.cursors = this.input.keyboard.createCursorKeys(); this.wasd = this.input.keyboard.addKeys('W,A,S,D');
+      this.keyM = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.M);
+      this.keyR = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R);
+
+      // Controllo touch/click con punto bersaglio
       this.pointerTarget = null; this.pointerMarker = this.add.circle(0, 0, 8, 0x000000, 0.3).setVisible(false);
       const setPointerTarget = (p)=>{ this.pointerTarget = { x: p.worldX, y: p.worldY }; this.pointerMarker.setPosition(this.pointerTarget.x, this.pointerTarget.y).setVisible(true); };
       this.input.on('pointerdown', setPointerTarget); this.input.on('pointermove', (p)=>{ if (p.isDown) setPointerTarget(p); });
+
       this.physics.add.overlap(this.player, this.foods, this.onEatFood, null, this); this.physics.add.overlap(this.player, this.bonuses, this.onTakeBonus, null, this);
+
+      // Effetto “nuoto” in fascia mare
+      this.swimFX = this.add.text(0,0,'💦',{ fontFamily:FONT, fontSize:20 }).setVisible(false);
     }
     restartLand(){ resetForNewRun(); this.scene.start('LandScene'); }
     getSafeSpawn(minDist=120){ const { width, height } = this.scale; const b = { xMin: 40, xMax: width-40, yMin: height*0.4, yMax: height-40 }; return randomPointAvoiding({x:this.player.x,y:this.player.y}, minDist, b); }
@@ -346,17 +387,60 @@
     spawnFoodAt(x,y,t){ const food=this.add.text(x,y,labelForFood(t),{ fontFamily:FONT, fontSize:18, color:colorForFood(t)}).setOrigin(0.5); this.physics.add.existing(food); food.body.setCircle(24).setOffset(-24,-24); food.body.setImmovable(true); food.foodType=t; this.foods.add(food);}  
     spawnSingleFood(){ const types=[Foods.BAMBOO,Foods.PASTA,Foods.PIZZA,Foods.GELATO]; const t=Phaser.Utils.Array.GetRandom(types); const p=this.getSafeSpawn(120); this.spawnFoodAt(p.x,p.y,t); }
     spawnBonusNarwhal(){ if (GameState.hasNarwhal) return; const p=this.getSafeSpawn(160); const b=this.add.text(p.x,p.y,'🐋 Narvalo',{ fontFamily:FONT, fontSize:18, color:'#551a8b'}).setOrigin(0.5); this.physics.add.existing(b); b.body.setCircle(26).setOffset(-26,-26); b.body.setImmovable(true); b.bonusType='narwhal'; this.bonuses.add(b);}  
-    onEatFood(player, food){ const now=this.time.now; if (now-this.sceneStartMs< this.GRACE_MS) return; if (now-this.lastEatMs<this.EAT_COOLDOWN_MS) return; this.lastEatMs=now; const gain=poopGain(GameState.selected, food.foodType); if (gain===0){ this.tweens.add({targets:food, angle:10, yoyo:true, duration:120, onComplete:()=>food.destroy()}); SFX.wrong(); } else { GameState.poopMeter=Math.max(0, Math.min(1, GameState.poopMeter+gain)); this.tweens.add({targets:food, scale:1.3, yoyo:true, duration:120, onComplete:()=>food.destroy()}); SFX.eat(); } this.time.delayedCall(300, ()=>this.spawnSingleFood()); }
+    onEatFood(player, food){
+      const now=this.time.now; if (now-this.sceneStartMs< this.GRACE_MS) return; if (now-this.lastEatMs<this.EAT_COOLDOWN_MS) return; this.lastEatMs=now;
+      const gain=poopGain(GameState.selected, food.foodType);
+      if (gain===0){
+        // Cibo NON adatto → aumenta “mal di pancia”
+        GameState.stomach = Math.min(1, GameState.stomach + 0.22);
+        this.tweens.add({targets:food, angle:10, yoyo:true, duration:120, onComplete:()=>food.destroy()});
+        SFX.wrong();
+      } else {
+        GameState.poopMeter = Math.min(1, GameState.poopMeter + gain);
+        this.tweens.add({targets:food, scale:1.25, yoyo:true, duration:120, onComplete:()=>food.destroy()});
+        SFX.eat();
+      }
+      this.time.delayedCall(300, ()=>this.spawnSingleFood());
+    }
     onTakeBonus(player, bonus){ if (bonus.bonusType==='narwhal'){ GameState.hasNarwhal=true; this.tweens.add({ targets:bonus, angle:360, scale:1.5, duration:240, onComplete:()=>bonus.destroy() }); SFX.narwhal(); } }
     tryGoSea(){ if (GameState.poopMeter<0.6 || GameState.transitioning) return; GameState.transitioning=true; this.scene.start('SeaScene'); }
-    update(time, delta){ const speed=160; const body=this.player.body; body.setVelocity(0);
+    update(time, delta){
+      const { width, height } = this.scale;
+      const body=this.player.body; body.setVelocity(0);
+
+      // Cammina su sabbia, “nuota” in fascia mare (altezza 35%-60%)
+      const inWater = (this.player.y >= height*0.35 && this.player.y <= height*0.60);
+      const speed = inWater ? 110 : 160;
+
+      // Movimenti
       if (this.cursors.left.isDown||this.wasd.A.isDown) body.setVelocityX(-speed); else if (this.cursors.right.isDown||this.wasd.D.isDown) body.setVelocityX(speed);
       if (this.cursors.up.isDown||this.wasd.W.isDown) body.setVelocityY(-speed); else if (this.cursors.down.isDown||this.wasd.S.isDown) body.setVelocityY(speed);
-      if (this.pointerTarget){ const dx=this.pointerTarget.x-this.player.x, dy=this.pointerTarget.y-this.player.y, dist=Math.hypot(dx,dy); if (dist>6) body.setVelocity((dx/dist)*speed, (dy/dist)*speed); else { this.pointerTarget=null; this.pointerMarker.setVisible(false);} }
-      this.ui.clear(); drawProgressBar(this.ui, 16, 12, 220, 22, GameState.poopMeter); this.uiText.setText(`Pupù: ${Math.round(GameState.poopMeter*100)}%`);
-      const canSea = GameState.poopMeter>=0.6; this.promptText.setText(canSea? 'Premi M o tocca ▶ Vai al Mare':'Mangia i cibi adatti per riempire la barra'); this.seaBtn.visible=canSea;
-      if (Phaser.Input.Keyboard.JustDown(this.keyM)) this.tryGoSea(); if (Phaser.Input.Keyboard.JustDown(this.keyR)) this.restartLand();
-      if (GameState.poopMeter>=1.0) { SFX.lose(); this.scene.start('LoseScene'); }
+      if (this.pointerTarget){
+        const dx=this.pointerTarget.x-this.player.x, dy=this.pointerTarget.y-this.player.y, dist=Math.hypot(dx,dy);
+        if (dist>6) body.setVelocity((dx/dist)*speed, (dy/dist)*speed); else { this.pointerTarget=null; this.pointerMarker.setVisible(false);}
+      }
+
+      // UI barre a destra
+      const barW=220, barH=22, pad=16;
+      const xRight = width - barW - pad;
+      this.ui.clear();
+      drawProgressBar(this.ui, xRight, 12, barW, barH, GameState.poopMeter, 0x9b5a1a);
+      drawProgressBar(this.ui, xRight, 12+barH+6, barW, barH, GameState.stomach,   0xcc3333);
+      this.poopText.setPosition(xRight+barW, 12).setText(`Pupù: ${Math.round(GameState.poopMeter*100)}%`);
+      this.stomachText.setPosition(xRight+barW, 12+barH+6).setText(`Mal di pancia: ${Math.round(GameState.stomach*100)}%`);
+
+      const canSea = GameState.poopMeter>=0.6;
+      this.promptText.setText(canSea? 'Premi M o tocca ▶ Vai al Mare':'Mangia i cibi adatti per riempire la barra'); this.seaBtn.visible=canSea;
+      if (Phaser.Input.Keyboard.JustDown(this.keyM)) this.tryGoSea();
+      if (Phaser.Input.Keyboard.JustDown(this.keyR)) this.restartLand();
+
+      // Sconfitte in fase Terra:
+      if (GameState.poopMeter>=1.0) { SFX.lose(); this.scene.start('LoseScene', { reason:'overeat' }); }
+      if (GameState.stomach>=1.0)   { SFX.lose(); this.scene.start('LoseScene', { reason:'stomachache' }); }
+
+      // Effetto nuoto
+      this.swimFX.setVisible(inWater).setPosition(this.player.x, this.player.y - 34);
+
       const moving = body.velocity.length() > 5; updateLimbs(this.playerLimbs, this.player.x, this.player.y, moving, time/1000);
     }
     shutdown(){ this.playerLimbs?.destroy?.(); }
@@ -366,100 +450,344 @@
     constructor(){ super('SeaScene'); }
     create(){
       const { width, height } = this.scale; GameState.transitioning=false;
+
+      // Layout: acqua in alto, SPIAGGIA in basso (dove sta il bagnino e si arena la 💩)
       this.cameras.main.setBackgroundColor('#3CB7E7');
+      this.beachHeight = Math.floor(height * 0.26);
+      this.beachTopY   = height - this.beachHeight;
+
+      const bg = this.add.graphics();
+      // mare pieno (sfondo)
+      bg.fillStyle(0x3CB7E7,1); bg.fillRect(0,0,width,height);
+      // spiaggia
+      bg.fillStyle(0xF4E2B5,1); bg.fillRect(0, this.beachTopY, width, this.beachHeight);
+
       const key = `char_${GameState.selected.specie}_${GameState.selected.eta}_${GameState.selected.genere}`; createCharacterTexture(this, key, GameState.selected);
-      this.player = this.add.image(width*0.5, height*0.7, key); this.physics.add.existing(this.player); this.player.body.setCircle(this.player.displayWidth/2); this.player.body.setCollideWorldBounds(true);
+      this.player = this.add.image(width*0.5, this.beachTopY - 40, key); // parte vicino alla riva
+      this.physics.add.existing(this.player); this.player.body.setCircle(this.player.displayWidth/2); this.player.body.setCollideWorldBounds(true);
+
       this.playerLimbs = makeLimbs(this, 0x001122);
-      this.currentAngle = Phaser.Math.FloatBetween(-Math.PI, Math.PI); this.currentSpeed = 38; this.currentFrozen = false; this.currentArrow = this.add.graphics();
+
+      // Corrente marina (come versione precedente, senza timer missione)
+      this.currentAngle = Phaser.Math.FloatBetween(-Math.PI, Math.PI);
+      this.currentSpeed = 38;
+      this.currentFrozen = false;
+      this.currentArrow = this.add.graphics();
+
+      // Nuvola che annuncia cambio corrente
       this.cloud = this.add.text(width/2, 36, '☁️☁️☁️', { fontFamily:FONT, fontSize: 40, color:'#ffffff' }).setOrigin(0.5).setVisible(false);
       this.tweens.add({ targets:this.cloud, scale:1.15, yoyo:true, repeat:-1, duration:450, ease:'Sine.easeInOut' });
       this.scheduleNextCurrentChange();
+
       this.poops = this.add.group(); this.narwhals = []; this.swimmers = [];
-      const lifekey = 'lifeguard_tex'; if (!this.textures.exists(lifekey)) createLifeguardTexture(this, lifekey); this.lifeguardSprite = this.add.image(width/2, 60, lifekey);
-      this.lifeguard = { x: this.lifeguardSprite.x, y: this.lifeguardSprite.y, dir: Math.PI/2, sweepMin: Math.PI/2 - Phaser.Math.DegToRad(35), sweepMax: Math.PI/2 + Phaser.Math.DegToRad(35), speed: Phaser.Math.DegToRad(20), fov: Phaser.Math.DegToRad(50), range: 360, distractedUntil: 0 };
+
+      // Bagnino sulla SPIAGGIA
+      const lifekey = 'lifeguard_tex'; if (!this.textures.exists(lifekey)) createLifeguardTexture(this, lifekey);
+      this.lifeguardSprite = this.add.image(width/2, this.beachTopY - 20, lifekey);
+
+      this.lifeguard = {
+        x: this.lifeguardSprite.x, y: this.lifeguardSprite.y,
+        dir: Math.PI/2, sweepMin: Math.PI/2 - Phaser.Math.DegToRad(35), sweepMax: Math.PI/2 + Phaser.Math.DegToRad(35),
+        speed: Phaser.Math.DegToRad(20), fov: Phaser.Math.DegToRad(50), range: 360, distractedUntil: 0
+      };
+
       this.visionGfx = this.add.graphics();
+
+      // Nuotatori in mare
       const capColors = [0x00a3c4,0xffa726,0x8e24aa,0x2e7d32,0xd32f2f,0x455a64];
       for (let i=0; i<6; i++) this.spawnSwimmer(Phaser.Utils.Array.GetRandom(capColors));
+
+      // Bonus di mare (narvalo/sirena/tornado) + bonus GRANCHIO sulla spiaggia
       this.seaBonuses = this.physics.add.group();
       if (!GameState.hasNarwhal) this.spawnSeaBonus('narwhal');
-      if (!GameState.hasSiren) this.spawnSeaBonus('siren');
+      if (!GameState.hasSiren)   this.spawnSeaBonus('siren');
       if (!GameState.hasTornado) this.spawnSeaBonus('tornado');
+      this.spawnCrabBonus();
+
+      // Tornado
       this.tornado = null; this.tornadoGfx = this.add.graphics();
+
+      // UI (barre a destra)
       this.ui = this.add.graphics();
       this.uiText = this.add.text(16, 12, '', { fontFamily:FONT, fontSize: 16, color:'#001' });
       this.statusText = this.add.text(width/2, 12, '', { fontFamily:FONT, fontSize: 16, color:'#001' }).setOrigin(0.5);
+      this.poopText = this.add.text(0, 0, '', { fontFamily:FONT, fontSize: 14, color:'#001' }).setOrigin(1,0);
+      this.stomachText = this.add.text(0, 0, '', { fontFamily:FONT, fontSize: 14, color:'#001' }).setOrigin(1,0);
+
+      // Controlli
       this.dropBtn   = this.add.text(16, height - 44, 'Sgancia 💩 (SPAZIO)', { fontFamily:FONT, fontSize: 18, color:'#ffffff', backgroundColor:'#a34a00', padding:{left:10,right:10,top:6,bottom:6} }).setInteractive({useHandCursor:true}).on('pointerdown',()=>{ this.dropPoop(); SFX.drop(); });
       this.narBtn    = this.add.text(260, height - 44, 'Narvalo 🐋 (N)',     { fontFamily:FONT, fontSize: 18, color:'#ffffff', backgroundColor:'#6a1b9a', padding:{left:10,right:10,top:6,bottom:6} }).setInteractive({useHandCursor:true}).on('pointerdown',()=>{ this.triggerNarwhal(); SFX.narwhal(); });
       this.sirenBtn  = this.add.text(440, height - 44, 'Sirena ✨ (S)',      { fontFamily:FONT, fontSize: 18, color:'#ffffff', backgroundColor:'#2947a3', padding:{left:10,right:10,top:6,bottom:6} }).setInteractive({useHandCursor:true}).on('pointerdown',()=>{ this.triggerSiren(); SFX.siren(); });
       this.tornBtn   = this.add.text(600, height - 44, 'Tornado 🌀 (T)',     { fontFamily:FONT, fontSize: 18, color:'#ffffff', backgroundColor:'#00695c', padding:{left:10,right:10,top:6,bottom:6} }).setInteractive({useHandCursor:true}).on('pointerdown',()=>{ this.triggerTornado(); SFX.tornado(); });
       this.menuBtn   = this.add.text(width - 280, height - 44, '⬅ Menu',     { fontFamily:FONT, fontSize: 18, color:'#ffffff', backgroundColor:'#444', padding:{left:10,right:10,top:6,bottom:6} }).setInteractive({useHandCursor:true}).on('pointerdown',()=>{ resetForNewRun(); this.scene.start('MenuScene'); });
       this.restartBtn= this.add.text(width - 140, height - 44, '⟲ Ricomincia',{ fontFamily:FONT, fontSize: 18, color:'#ffffff', backgroundColor:'#444', padding:{left:10,right:10,top:6,bottom:6} }).setInteractive({useHandCursor:true}).on('pointerdown',()=>{ resetForNewRun(); this.scene.start('LandScene'); });
-      this.tut = this.add.text(width/2, height-90, 'Usa corrente & bonus (N/S/T). Cono del bagnino = rosso. Evita che 💩 entri nei coni per 60s!', { fontFamily:FONT, fontSize: 16, color:'#001', backgroundColor:'#fff', padding:{left:8,right:8,top:6,bottom:6} }).setOrigin(0.5);
-      this.time.delayedCall(6000, ()=> this.tut.setVisible(false));
-      this.cursors = this.input.keyboard.createCursorKeys(); this.wasd = this.input.keyboard.addKeys('W,A,S,D'); this.keySpace = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE); this.keyS = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S); this.keyN = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.N); this.keyT = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.T);
+
+      this.tut = this.add.text(width/2, height-90, 'Lascia la 💩 in mare e aspetta che si arena. Evita i coni (bagnino/nuotatori/granchi). Prendi il bonus 🦀 sulla spiaggia!', { fontFamily:FONT, fontSize: 16, color:'#001', backgroundColor:'#fff', padding:{left:8,right:8,top:6,bottom:6} }).setOrigin(0.5);
+      this.time.delayedCall(7000, ()=> this.tut.setVisible(false));
+
+      this.cursors = this.input.keyboard.createCursorKeys(); this.wasd = this.input.keyboard.addKeys('W,A,S,D');
+      this.keySpace = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+      this.keyS = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S);
+      this.keyN = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.N);
+      this.keyT = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.T);
       this.pointerTarget = null; this.pointerMarker = this.add.circle(0,0,8,0x000000,0.3).setVisible(false);
       const setPointerTarget = (p)=>{ this.pointerTarget = { x: p.worldX, y: p.worldY }; this.pointerMarker.setPosition(this.pointerTarget.x, this.pointerTarget.y).setVisible(true); };
       this.input.on('pointerdown', setPointerTarget); this.input.on('pointermove', (p)=>{ if (p.isDown) setPointerTarget(p); });
-      this.physics.add.overlap(this.player, this.seaBonuses, (player, b)=>{ if (b.type==='narwhal'){ GameState.hasNarwhal = true; SFX.narwhal(); } if (b.type==='siren'){ GameState.hasSiren = true; SFX.siren(); } if (b.type==='tornado'){ GameState.hasTornado = true; SFX.tornado(); } this.tweens.add({ targets:b, angle:360, scale:1.5, duration:240, onComplete:()=>b.destroy() }); });
+
+      this.physics.add.overlap(this.player, this.seaBonuses, (player, b)=>{
+        if (b.type==='narwhal'){ GameState.hasNarwhal = true; SFX.narwhal(); }
+        if (b.type==='siren')  { GameState.hasSiren = true;   SFX.siren(); }
+        if (b.type==='tornado'){ GameState.hasTornado = true; SFX.tornado(); }
+        if (b.type==='crab')   { GameState.crabsFriendly = true; SFX.crab(); this.onCrabsBefriend(); }
+        this.tweens.add({ targets:b, angle:360, scale:1.5, duration:240, onComplete:()=>b.destroy() });
+      });
+
+      // Crea granchi sulla spiaggia
+      this.crabs = []; this.crabGfx = this.add.graphics();
+      this.spawnCrabs(6); // numero granchi
+
+      // Delay breve per inizializzare
+      this.time.delayedCall(300, ()=> this.updateStatusTexts());
     }
-    scheduleNextCurrentChange(){ const nextMs = Phaser.Math.Between(12000, 20000); this._cloudTimer1 = this.time.delayedCall(nextMs - 2500, ()=>{ if (!this.currentFrozen) this.cloud.setVisible(true); }); this._cloudTimer2 = this.time.delayedCall(nextMs, ()=>{ if (this.currentFrozen) { this.cloud.setVisible(false); this.scheduleNextCurrentChange(); return; } this.currentAngle = Phaser.Math.FloatBetween(-Math.PI, Math.PI); this.cloud.setVisible(false); this.scheduleNextCurrentChange(); }); }
-    spawnSeaBonus(type){ const { width, height } = this.scale; const x = Phaser.Math.Between(40, width-40), y = Phaser.Math.Between(height*0.35, height-40); const label = type==='narwhal' ? '🐋 Narvalo' : type==='siren' ? '🧜‍♀️ Sirena' : '🌀 Tornado'; const color = type==='narwhal' ? '#6a1b9a' : type==='siren' ? '#0a4abf' : '#00695c'; const b = this.add.text(x, y, label, { fontFamily:FONT, fontSize: 18, color: color }).setOrigin(0.5); this.physics.add.existing(b); b.body.setCircle(26).setOffset(-26,-26); b.body.setImmovable(true); b.type = type; this.seaBonuses.add(b); }
-    spawnSwimmer(tint){ const { width, height } = this.scale; const x = Phaser.Math.Between(60, width-60), y = Phaser.Math.Between(height*0.35, height-80); const key = `swim_${tint}`; if (!this.textures.exists(key)) createSwimmerTexture(this, key, tint); const s = this.add.image(x,y,key); this.physics.add.existing(s); s.body.setCircle(s.displayWidth/2); s.body.setCollideWorldBounds(true); const limbs = makeLimbs(this, 0x223344); const data = { sprite:s, dir: Phaser.Math.FloatBetween(-Math.PI, Math.PI), speed: 40, fov: Phaser.Math.DegToRad(40), range: 140, changeAt: 0, limbs }; this.swimmers.push(data); }
+    scheduleNextCurrentChange(){
+      const nextMs = Phaser.Math.Between(12000, 20000);
+      this._cloudTimer1 = this.time.delayedCall(nextMs - 2500, ()=>{ if (!this.currentFrozen) this.cloud.setVisible(true); });
+      this._cloudTimer2 = this.time.delayedCall(nextMs, ()=>{
+        if (this.currentFrozen) { this.cloud.setVisible(false); this.scheduleNextCurrentChange(); return; }
+        this.currentAngle = Phaser.Math.FloatBetween(-Math.PI, Math.PI);
+        this.cloud.setVisible(false);
+        this.scheduleNextCurrentChange();
+      });
+    }
+    spawnSeaBonus(type){
+      const { width } = this.scale;
+      // bonus in ACQUA (non in spiaggia)
+      const x = Phaser.Math.Between(40, width-40), y = Phaser.Math.Between(90, this.beachTopY-60);
+      const label = type==='narwhal' ? '🐋 Narvalo' : type==='siren' ? '🧜‍♀️ Sirena' : '🌀 Tornado';
+      const color = type==='narwhal' ? '#6a1b9a' : type==='siren' ? '#0a4abf' : '#00695c';
+      const b = this.add.text(x, y, label, { fontFamily:FONT, fontSize: 18, color: color }).setOrigin(0.5);
+      this.physics.add.existing(b); b.body.setCircle(26).setOffset(-26,-26); b.body.setImmovable(true); b.type = type;
+      this.seaBonuses.add(b);
+    }
+    spawnCrabBonus(){
+      const { width } = this.scale;
+      const x = Phaser.Math.Between(40, width-40), y = Phaser.Math.Between(this.beachTopY+20, this.beachTopY + this.beachHeight - 30);
+      const b = this.add.text(x, y, '🦀 Bonus', { fontFamily:FONT, fontSize: 18, color:'#8B4513' }).setOrigin(0.5);
+      this.physics.add.existing(b); b.body.setCircle(26).setOffset(-26,-26); b.body.setImmovable(true); b.type='crab';
+      this.seaBonuses.add(b);
+    }
+    spawnSwimmer(tint){ const { width } = this.scale; const x = Phaser.Math.Between(60, width-60), y = Phaser.Math.Between(90, this.beachTopY-80); const key = `swim_${tint}`; if (!this.textures.exists(key)) createSwimmerTexture(this, key, tint); const s = this.add.image(x,y,key); this.physics.add.existing(s); s.body.setCircle(s.displayWidth/2); s.body.setCollideWorldBounds(true); const limbs = makeLimbs(this, 0x223344); const data = { sprite:s, dir: Phaser.Math.FloatBetween(-Math.PI, Math.PI), speed: 40, fov: Phaser.Math.DegToRad(40), range: 140, changeAt: 0, limbs }; this.swimmers.push(data); }
+    spawnCrabs(n=5){
+      for (let i=0;i<n;i++){
+        const x = Phaser.Math.Between(40, this.scale.width-40);
+        const y = Phaser.Math.Between(this.beachTopY+16, this.scale.height-32);
+        const t = this.add.text(x, y, '🦀', { fontFamily:FONT, fontSize: 22 }); this.physics.add.existing(t); t.body.setCircle(12).setCollideWorldBounds(true);
+        const crab = { sprite:t, dir: Phaser.Math.FloatBetween(-Math.PI, Math.PI), speed: 34, fov: Phaser.Math.DegToRad(35), range: 110, changeAt: 0, friend:false };
+        this.crabs.push(crab);
+      }
+    }
+    onCrabsBefriend(){
+      // Tutti amici!
+      this.crabs.forEach(c=>c.friend=true);
+    }
     nearestPoop(from){ let best=null, bestD=1e9; this.poops.getChildren().forEach(p=>{ if(!p.active) return; const d=Phaser.Math.Distance.Between(from.x,from.y,p.x,p.y); if(d<bestD){ best=p; bestD=d; } }); return best; }
     triggerNarwhal(){ if (!GameState.hasNarwhal) return; const n = this.add.text(this.player.x, this.player.y, '🐋', { fontFamily:FONT, fontSize: 26 }); n._speed = 90; n._target = this.nearestPoop(n); this.narwhals.push(n); GameState.hasNarwhal = false; SFX.narwhal(); }
     triggerSiren(){ if (!GameState.hasSiren) return; GameState.hasSiren = false; const siren = this.add.text(this.player.x, this.player.y, '🧜‍♀️', { fontFamily:FONT, fontSize: 26 }); this.lifeguard.distractedUntil = this.time.now + 15000; this.time.delayedCall(15000, ()=>{ siren.destroy(); }); SFX.siren(); }
     triggerTornado(){ if (!GameState.hasTornado) return; GameState.hasTornado = false; this.tornado = { x: this.player.x, y: this.player.y, until: this.time.now + 15000 }; SFX.tornado(); }
-    dropPoop(){ if (GameState.poopMeter <= 0) return; const chunk = Math.min(GameState.poopMeter, 0.2); GameState.poopMeter = Math.max(0, Math.min(1, GameState.poopMeter - chunk)); const p = this.add.text(this.player.x, this.player.y, '💩', { fontFamily:FONT, fontSize: 20}); p._tDrop = this.time.now; p._ttlMs = 60000; p._label = this.add.text(p.x, p.y-18, '60', { fontFamily:FONT, fontSize: 12, color:'#001' }).setOrigin(0.5); this.poops.add(p); SFX.drop(); }
+    dropPoop(){
+      if (GameState.poopMeter <= 0) return;
+      const chunk = Math.min(GameState.poopMeter, 0.2);
+      GameState.poopMeter = Math.max(0, Math.min(1, GameState.poopMeter - chunk));
+      const p = this.add.text(this.player.x, this.player.y, '💩', { fontFamily:FONT, fontSize: 20});
+      p._tDrop = this.time.now; p._ttlMs = 60000; p._stranded=false;
+      p._label = this.add.text(p.x, p.y-18, '60', { fontFamily:FONT, fontSize: 12, color:'#001' }).setOrigin(0.5);
+      this.poops.add(p); SFX.drop();
+    }
     update(time, delta){
-      const dt = delta/1000; const speed=120; const body=this.player.body; body.setVelocity(0);
+      const dt = delta/1000; const { width, height } = this.scale;
+      const body=this.player.body; body.setVelocity(0);
+
+      // Player: in acqua -> corrente; su SPIAGGIA -> niente corrente
+      const onBeach = (this.player.y >= this.beachTopY);
+      const speed = onBeach ? 150 : 120;
+
       if (this.cursors.left.isDown||this.wasd.A.isDown) body.setVelocityX(-speed); else if (this.cursors.right.isDown||this.wasd.D.isDown) body.setVelocityX(speed);
       if (this.cursors.up.isDown||this.wasd.W.isDown) body.setVelocityY(-speed); else if (this.cursors.down.isDown||this.wasd.S.isDown) body.setVelocityY(speed);
       if (this.pointerTarget){ const dx=this.pointerTarget.x-this.player.x, dy=this.pointerTarget.y-this.player.y, dist=Math.hypot(dx,dy); if (dist>6) body.setVelocity((dx/dist)*speed,(dy/dist)*speed); else { this.pointerTarget=null; this.pointerMarker.setVisible(false);} }
-      const cx = Math.cos(this.currentAngle)*this.currentSpeed; const cy = Math.sin(this.currentAngle)*this.currentSpeed;
-      body.velocity.x += cx; body.velocity.y += cy;
+
+      // Corrente marina (solo acqua)
+      const cx = Math.cos(this.currentAngle)*this.currentSpeed;
+      const cy = Math.sin(this.currentAngle)*this.currentSpeed;
+      if (!onBeach){ body.velocity.x += cx; body.velocity.y += cy; }
+
+      // Freccia corrente in alto a SINISTRA
       this.currentArrow.clear(); this.currentArrow.fillStyle(0x002244, 0.15); this.currentArrow.fillCircle(40, 40, 18); this.currentArrow.lineStyle(5, 0xfff176, 0.95);
       const ax=40, ay=40; const ex=ax + Math.cos(this.currentAngle)*32, ey=ay + Math.sin(this.currentAngle)*32; this.currentArrow.lineBetween(ax, ay, ex, ey);
       this.currentArrow.fillStyle(0xfff176, 1); this.currentArrow.fillTriangle(ex, ey, ex - Math.cos(this.currentAngle+0.5)*10, ey - Math.sin(this.currentAngle+0.5)*10, ex - Math.cos(this.currentAngle-0.5)*10, ey - Math.sin(this.currentAngle-0.5)*10);
-      if (time >= this.lifeguard.distractedUntil){ this.lifeguard.dir += this.lifeguard.speed * dt; if (this.lifeguard.dir > this.lifeguard.sweepMax || this.lifeguard.dir < this.lifeguard.sweepMin){ this.lifeguard.speed *= -1; this.lifeguard.dir = Phaser.Math.Clamp(this.lifeguard.dir, this.lifeguard.sweepMin, this.lifeguard.sweepMax); } }
-      for (const s of this.swimmers){ if (time > s.changeAt){ s.dir = Phaser.Math.FloatBetween(-Math.PI, Math.PI); s.changeAt = time + Phaser.Math.Between(1200, 2600); }
+
+      // Sweep bagnino (se non distratto)
+      if (time >= this.lifeguard.distractedUntil){
+        this.lifeguard.dir += this.lifeguard.speed * dt;
+        if (this.lifeguard.dir > this.lifeguard.sweepMax || this.lifeguard.dir < this.lifeguard.sweepMin){
+          this.lifeguard.speed *= -1; 
+          this.lifeguard.dir = Phaser.Math.Clamp(this.lifeguard.dir, this.lifeguard.sweepMin, this.lifeguard.sweepMax);
+        }
+      }
+
+      // Nuotatori casuali + tornado
+      for (const s of this.swimmers){
+        if (time > s.changeAt){ s.dir = Phaser.Math.FloatBetween(-Math.PI, Math.PI); s.changeAt = time + Phaser.Math.Between(1200, 2600); }
         let vx = Math.cos(s.dir)*s.speed + cx, vy = Math.sin(s.dir)*s.speed + cy;
-        if (this.tornado && time < this.tornado.until){ const dx = this.tornado.x - s.sprite.x, dy = this.tornado.y - s.sprite.y; const d = Math.hypot(dx,dy)||1; const pull = 120; vx += (dx/d)*pull; vy += (dy/d)*pull; }
+        if (this.tornado && time < this.tornado.until){
+          const dx = this.tornado.x - s.sprite.x, dy = this.tornado.y - s.sprite.y; const d = Math.hypot(dx,dy)||1; const pull = 120;
+          vx += (dx/d)*pull; vy += (dy/d)*pull;
+        }
         s.sprite.body.setVelocity(vx, vy);
         const moving = Math.hypot(vx,vy)>5; updateLimbs(s.limbs, s.sprite.x, s.sprite.y, moving, time/1000);
       }
       if (this.tornado && time >= this.tornado.until){ this.tornado=null; this.tornadoGfx.clear(); }
       this.tornadoGfx.clear(); if (this.tornado){ this.tornadoGfx.lineStyle(3, 0x00695c, 0.9); this.tornadoGfx.strokeCircle(this.tornado.x, this.tornado.y, 24); this.tornadoGfx.strokeCircle(this.tornado.x, this.tornado.y, 12); this.tornadoGfx.strokeCircle(this.tornado.x, this.tornado.y, 36); }
-      for (const n of this.narwhals){ if (!n.active) continue; if (!n._target || !n._target.active) n._target = this.nearestPoop(n); if (n._target){ const dx = n._target.x - n.x, dy = n._target.y - n.y; const d = Math.hypot(dx,dy)||1; n.x += (dx/d)*n._speed*dt + cx*dt; n.y += (dy/d)*n._speed*dt + cy*dt; if (d<10 && n._target.active){ n._target._label?.destroy(); n._target.destroy(); n._target = this.nearestPoop(n); SFX.narwhal(); } } else { n.x += cx*dt; n.y += cy*dt; n._despawnAt = n._despawnAt || (time+2000); if (time>=n._despawnAt){ n.destroy(); } } }
-      this.currentFrozen = this.poops.countActive(true) > 0; if (this.currentFrozen) this.cloud.setVisible(false);
-      this.poops.getChildren().forEach(p=>{ p.x += cx*dt; p.y += cy*dt; p._label?.setPosition(p.x, p.y-18); const left = Math.max(0, Math.ceil((p._ttlMs - (time - p._tDrop))/1000)); p._label?.setText(left.toString()); if (left<=0 && p.active){ p._label?.destroy(); p.destroy(); } });
-      this.visionGfx.clear(); this.drawCone(this.visionGfx, this.lifeguard.x, this.lifeguard.y, this.lifeguard.dir, this.lifeguard.fov, this.lifeguard.range, 0xff0000, 0.15);
+
+      // Narvali che puliscono
+      for (const n of this.narwhals){
+        if (!n.active) continue;
+        if (!n._target || !n._target.active) n._target = this.nearestPoop(n);
+        if (n._target){
+          const dx = n._target.x - n.x, dy = n._target.y - n.y; const d = Math.hypot(dx,dy)||1;
+          n.x += (dx/d)*n._speed*dt + cx*dt; n.y += (dy/d)*n._speed*dt + cy*dt;
+          if (d<10 && n._target.active){ n._target._label?.destroy(); n._target.destroy(); n._target = this.nearestPoop(n); SFX.narwhal(); }
+        } else {
+          n.x += cx*dt; n.y += cy*dt; n._despawnAt = n._despawnAt || (time+2000); if (time>=n._despawnAt){ n.destroy(); }
+        }
+      }
+
+      // 💩: si muove in acqua con la corrente; su SPIAGGIA si “arena” e resta ferma
+      this.poops.getChildren().forEach(p=>{
+        const wasBeach = p._stranded;
+        const nowBeach = (p.y >= this.beachTopY);
+        if (!p._stranded && !nowBeach){ p.x += cx*dt; p.y += cy*dt; }
+        if (nowBeach) p._stranded = true;
+        p._label?.setPosition(p.x, p.y-18);
+        const left = Math.max(0, Math.ceil((p._ttlMs - (time - p._tDrop))/1000));
+        p._label?.setText(left.toString());
+        if (left<=0 && p.active){ p._label?.destroy(); p.destroy(); }
+        // Limita ai bordi
+        p.x = Phaser.Math.Clamp(p.x, 8, width-8);
+        p.y = Phaser.Math.Clamp(p.y, 60, height-8);
+      });
+
+      // Granchi: pattuglia spiaggia; se amici, mangiano la 💩
+      for (const c of this.crabs){
+        if (time > c.changeAt){ c.dir = Phaser.Math.FloatBetween(-Math.PI, Math.PI); c.changeAt = time + Phaser.Math.Between(1000, 2200); }
+        let vx = Math.cos(c.dir)*c.speed, vy = Math.sin(c.dir)*c.speed;
+        // resta su SPIAGGIA
+        const nx = c.sprite.x + vx*dt, ny = c.sprite.y + vy*dt;
+        if (ny < this.beachTopY+10 || ny > height-16) { c.dir = -c.dir; continue; }
+        c.sprite.x = Phaser.Math.Clamp(nx, 16, width-16);
+        c.sprite.y = Phaser.Math.Clamp(ny, this.beachTopY+10, height-16);
+
+        if (c.friend){
+          // “Amico”: cerca la 💩 più vicina e la mangia
+          const target = this.nearestPoop(c.sprite);
+          if (target){
+            const dx=target.x-c.sprite.x, dy=target.y-c.sprite.y, d=Math.hypot(dx,dy)||1;
+            c.sprite.x += (dx/d)*50*dt; c.sprite.y += (dy/d)*50*dt;
+            if (d<12 && target.active){ target._label?.destroy(); target.destroy(); SFX.crab(); }
+          }
+        }
+      }
+
+      // Disegna coni di visione: bagnino + nuotatori + (granchi se NON amici)
+      this.visionGfx.clear();
+      this.drawCone(this.visionGfx, this.lifeguard.x, this.lifeguard.y, this.lifeguard.dir, this.lifeguard.fov, this.lifeguard.range, 0xff0000, 0.15);
       for (const s of this.swimmers){ this.drawCone(this.visionGfx, s.sprite.x, s.sprite.y, s.dir, s.fov, s.range, 0xff8800, 0.12); }
-      if (this.isAnyPoopDetected()){ SFX.lose(); resetForNewRun(); this.scene.start('LoseScene'); return; }
+      if (!GameState.crabsFriendly){
+        for (const c of this.crabs){
+          // piccolissimo cono
+          const dir = c.dir, fov = Phaser.Math.DegToRad(35), range = 80;
+          this.drawCone(this.visionGfx, c.sprite.x, c.sprite.y, dir, fov, range, 0xaa5500, 0.12);
+        }
+      }
+
+      // Sconfitta se QUALCUNO vede una 💩 (bagnino, nuotatori, granchi non amici)
+      if (this.isAnyPoopDetected()){ SFX.lose(); resetForNewRun(); this.scene.start('LoseScene', { reason:'detected' }); return; }
+
+      // Vittoria: niente più “carico” e nessuna 💩 attiva
       if (GameState.poopMeter <= 0 && this.poops.countActive(true) === 0){ SFX.win(); resetForNewRun(); this.scene.start('WinScene'); return; }
-      const secPoop = Math.ceil(this.maxPoopRemainingSeconds(time));
-      const status = [ GameState.hasNarwhal? 'Narvalo pronto' : 'Narvalo no', GameState.hasSiren? 'Sirena pronta' : 'Sirena no', GameState.hasTornado? 'Tornado pronto' : 'Tornado no' ];
+
+      // HUD (barre a destra + stato bonus)
+      const barW=220, barH=22, pad=16, xRight = width - barW - pad;
+      this.ui.clear();
+      drawProgressBar(this.ui, xRight, 12, barW, barH, GameState.poopMeter, 0x9b5a1a);
+      drawProgressBar(this.ui, xRight, 12+barH+6, barW, barH, GameState.stomach,   0xcc3333);
+      this.poopText.setPosition(xRight+barW, 12).setText(`Pupù: ${Math.round(GameState.poopMeter*100)}%`);
+      this.stomachText.setPosition(xRight+barW, 12+barH+6).setText(`Mal di pancia: ${Math.round(GameState.stomach*100)}%`);
+
+      const status = [
+        GameState.hasNarwhal? 'Narvalo pronto' : 'Narvalo no',
+        GameState.hasSiren?   'Sirena pronta'  : 'Sirena no',
+        GameState.hasTornado? 'Tornado pronto' : 'Tornado no',
+        GameState.crabsFriendly? 'Granchi amici' : 'Granchi neutrali'
+      ];
       const distractLeft = Math.max(0, Math.ceil((this.lifeguard.distractedUntil - time)/1000));
-      this.ui.clear(); drawProgressBar(this.ui, 16, 12, 220, 22, GameState.poopMeter);
-      this.uiText.setText(`Pupù: ${Math.round(GameState.poopMeter*100)}%  |  Cacchette: ${this.poops.countActive(true)}  |  TTL max: ${isFinite(secPoop)?secPoop:0}s`);
+      this.uiText.setText(`Cacchette: ${this.poops.countActive(true)}`);
       this.statusText.setText(status.join('  •  ') + (distractLeft>0?`  •  Bagnino distratto: ${distractLeft}s`:''));
+
+      // Scorciatoie tastiera
       if (Phaser.Input.Keyboard.JustDown(this.keySpace)) { this.dropPoop(); SFX.drop(); }
       if (Phaser.Input.Keyboard.JustDown(this.keyS)) { this.triggerSiren(); SFX.siren(); }
       if (Phaser.Input.Keyboard.JustDown(this.keyN)) { this.triggerNarwhal(); SFX.narwhal(); }
       if (Phaser.Input.Keyboard.JustDown(this.keyT)) { this.triggerTornado(); SFX.tornado(); }
+
       const moving = body.velocity.length() > 5; updateLimbs(this.playerLimbs, this.player.x, this.player.y, moving, time/1000);
     }
-    drawCone(gfx, x, y, dir, fov, range, color, alpha){ gfx.fillStyle(color, alpha); const a1 = dir - fov/2, a2 = dir + fov/2; const p1 = { x: x + Math.cos(a1)*range, y: y + Math.sin(a1)*range }; const p2 = { x: x + Math.cos(a2)*range, y: y + Math.sin(a2)*range }; gfx.beginPath(); gfx.moveTo(x,y); gfx.lineTo(p1.x, p1.y); gfx.arc(x,y,range,a1,a2); gfx.lineTo(x,y); gfx.closePath(); gfx.fillPath(); }
-    isAnyPoopDetected(){ const poos = this.poops.getChildren(); for (const p of poos){ if (!p.active) continue; if (isInVisionCone({x:this.lifeguard.x,y:this.lifeguard.y}, this.lifeguard.dir, this.lifeguard.fov, this.lifeguard.range, {x:p.x,y:p.y})) return true; for (const s of this.swimmers){ if (isInVisionCone({x:s.sprite.x,y:s.sprite.y}, s.dir, s.fov, s.range, {x:p.x,y:p.y})) return true; } } return false; }
-    maxPoopRemainingSeconds(time){ let mx = 0; this.poops.getChildren().forEach(p=>{ if (p.active) mx = Math.max(mx, (p._ttlMs - (time - p._tDrop))/1000); }); return mx>0?mx:0; }
+    drawCone(gfx, x, y, dir, fov, range, color, alpha){
+      gfx.fillStyle(color, alpha);
+      const a1 = dir - fov/2, a2 = dir + fov/2;
+      const p1 = { x: x + Math.cos(a1)*range, y: y + Math.sin(a1)*range };
+      const p2 = { x: x + Math.cos(a2)*range, y: y + Math.sin(a2)*range };
+      gfx.beginPath(); gfx.moveTo(x,y); gfx.lineTo(p1.x, p1.y); gfx.arc(x,y,range,a1,a2); gfx.lineTo(x,y); gfx.closePath(); gfx.fillPath();
+    }
+    isAnyPoopDetected(){
+      // Bagnino
+      for (const p of this.poops.getChildren()){
+        if (!p.active) continue;
+        if (isInVisionCone({x:this.lifeguard.x,y:this.lifeguard.y}, this.lifeguard.dir, this.lifeguard.fov, this.lifeguard.range, {x:p.x,y:p.y})) return true;
+      }
+      // Nuotatori
+      for (const s of this.swimmers){
+        for (const p of this.poops.getChildren()){
+          if (!p.active) continue;
+          if (isInVisionCone({x:s.sprite.x,y:s.sprite.y}, s.dir, s.fov, s.range, {x:p.x,y:p.y})) return true;
+        }
+      }
+      // Granchi (se non amici)
+      if (!GameState.crabsFriendly){
+        for (const c of this.crabs){
+          for (const p of this.poops.getChildren()){
+            if (!p.active) continue;
+            if (isInVisionCone({x:c.sprite.x,y:c.sprite.y}, c.dir, Phaser.Math.DegToRad(35), 80, {x:p.x,y:p.y})) return true;
+          }
+        }
+      }
+      return false;
+    }
+    updateStatusTexts(){ /* placeholder se servisse aggiornare testi subito */ }
   }
 
   class LoseScene extends Phaser.Scene {
     constructor(){ super('LoseScene'); }
-    create(){
+    create(data){
       const { width, height } = this.scale;
       this.cameras.main.setBackgroundColor('#222');
-      this.add.text(width/2, height/2 - 40, 'Ops! Sei stato scoperto! 🚨', { fontFamily:FONT, fontSize: 26, color:'#ffffff' }).setOrigin(0.5);
-      this.add.text(width/2, height/2 + 10, 'Riprova usando correnti e bonus.', { fontFamily:FONT, fontSize: 16, color:'#dddddd' }).setOrigin(0.5);
+
+      // Messaggio in base alla CAUSA
+      let title = 'Ops! Sei stato scoperto! 🚨';
+      if (data?.reason==='overeat' || data?.reason==='stomachache'){
+        title = 'Oh no! Hai mangiato troppo e ti sei fatto cacca addosso! 💥💩';
+      }
+
+      this.add.text(width/2, height/2 - 40, title, { fontFamily:FONT, fontSize: 24, color:'#ffffff', align:'center', wordWrap:{ width: Math.min(600, width-40) } }).setOrigin(0.5);
       this.add.text(width/2 - 130, height - 60, '⬅ Menu', { fontFamily:FONT, fontSize:22, color:'#fff', backgroundColor:'#444', padding:{left:10,right:10,top:6,bottom:6} }).setOrigin(0.5).setInteractive({useHandCursor:true}).on('pointerdown', ()=>{ resetForNewRun(); this.scene.start('MenuScene'); });
       this.add.text(width/2 + 130, height - 60, '⟲ Riprova', { fontFamily:FONT, fontSize:22, color:'#fff', backgroundColor:'#444', padding:{left:10,right:10,top:6,bottom:6} }).setOrigin(0.5).setInteractive({useHandCursor:true}).on('pointerdown', ()=>{ resetForNewRun(); this.scene.start('LandScene'); });
     }
@@ -477,9 +805,7 @@
     }
   }
 
-  // =====================================
-  // BOOT
-  // =====================================
+  // ========== BOOT ==========
   function setupAudioUnlock(){
     const gate = document.getElementById('audio-gate');
     const btn  = document.getElementById('audio-btn');
@@ -510,10 +836,8 @@
     return new Phaser.Game(config);
   }
 
-  // Espone una mini-API globale per integrazione (es. Unity WebView)
   window.PooPooPanda = { createGame };
 
-  // Avvio automatico se presente il container di default
   window.addEventListener('DOMContentLoaded', ()=>{
     const el = document.getElementById('game-container');
     if (el) window.PooPooPanda._game = createGame({ parent: 'game-container' });

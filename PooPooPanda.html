@@ -485,7 +485,7 @@
       const lifekey = 'lifeguard_tex'; if (!this.textures.exists(lifekey)) createLifeguardTexture(this, lifekey);
       this.lifeguardSprite = this.add.image(width/2, this.beachTopY - 20, lifekey);
 
-      this.lifeguard = {
+    this.lifeguard = {
   x: this.lifeguardSprite.x, 
   y: this.lifeguardSprite.y,
   dir: -Math.PI/2,
@@ -496,6 +496,7 @@
   range: 360,
   distractedUntil: 0
 };
+
       this.visionGfx = this.add.graphics();
 
       // Nuotatori in mare
@@ -717,9 +718,13 @@
       // Sconfitta se QUALCUNO vede una 💩 (bagnino, nuotatori, granchi non amici)
       if (this.isAnyPoopDetected()){ SFX.lose(); resetForNewRun(); this.scene.start('LoseScene', { reason:'detected' }); return; }
 
-      // Vittoria: niente più “carico” e nessuna 💩 attiva
-      if (GameState.poopMeter <= 0 && this.poops.countActive(true) === 0){ SFX.win(); resetForNewRun(); this.scene.start('WinScene'); return; }
-
+     // Vittoria: niente più “carico” e nessuna 💩 attiva → si va al livello BOSS
+if (GameState.poopMeter <= 0 && this.poops.countActive(true) === 0){
+  SFX.win();
+  // NON facciamo resetForNewRun: ci servono ancora i bonus nel livello finale
+  this.scene.start('BossScene');
+  return;
+}
       // HUD (barre a destra + stato bonus)
       const barW=220, barH=22, pad=16, xRight = width - barW - pad;
       this.ui.clear();
@@ -779,6 +784,35 @@
     }
     updateStatusTexts(){ /* placeholder se servisse aggiornare testi subito */ }
   }
+    class BossScene extends Phaser.Scene {
+    constructor(){ super('BossScene'); }
+
+    create(){
+      const { width, height } = this.scale;
+      this.cameras.main.setBackgroundColor('#102131');
+
+      this.add.text(width/2, height/2 - 40, 'Livello finale: Bagnino Boss 🛟',
+        { fontFamily: FONT, fontSize: 26, color:'#ffffff', align:'center', wordWrap:{ width: Math.min(600, width-40) } }
+      ).setOrigin(0.5);
+
+      this.add.text(width/2, height/2 + 10,
+        'Placeholder: nella prossima versione qui combatterai contro il bagnino!\n(Per ora puoi solo concludere la partita.)',
+        { fontFamily: FONT, fontSize: 16, color:'#cfd8dc', align:'center', wordWrap:{ width: Math.min(620, width-40) } }
+      ).setOrigin(0.5);
+
+      // Pulsante per concludere provvisoriamente andando alla schermata di vittoria attuale
+      const btn = this.add.text(width/2, height - 60, '▶ Concludi (provvisorio)',
+        { fontFamily: FONT, fontSize: 22, color:'#ffffff', backgroundColor:'#2e7d32',
+          padding:{ left:16, right:16, top:8, bottom:8 } }
+      ).setOrigin(0.5).setInteractive({ useHandCursor:true });
+
+      btn.on('pointerdown', ()=>{
+        resetForNewRun();
+        this.scene.start('WinScene');
+      });
+    }
+  }
+
 
   class LoseScene extends Phaser.Scene {
     constructor(){ super('LoseScene'); }
@@ -836,7 +870,7 @@
       parent,
       scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
       physics: { default: 'arcade', arcade: { gravity: { y: 0 }, debug: false } },
-      scene: [MenuScene, LandScene, SeaScene, LoseScene, WinScene]
+     scene: [MenuScene, LandScene, SeaScene, BossScene, LoseScene, WinScene]
     };
     return new Phaser.Game(config);
   }

@@ -336,7 +336,7 @@ this.add.text(
   {
     fontFamily: FONT,
     fontSize: 14,
-    color: "#FF0000"
+    color: "  n"
   }
 ).setOrigin(1, 1).setAlpha(0.8);
     }
@@ -941,53 +941,59 @@ if (GameState.poopMeter <= 0 && this.poops.countActive(true) === 0){
   }
 
   // --- LOGICA SPARO BOSS ---
-  bossShoot(time){
-    if (time < this.lastBossShot + this.bossShotInterval) return;
-    if (time < this.bossFrozenUntil) return;
+bossShoot(time){
+  if (time < this.lastBossShot + this.bossShotInterval) return;
+  if (time < this.bossFrozenUntil) return;
 
-    this.lastBossShot = time;
+  this.lastBossShot = time;
 
-    const emojis = ['🩴','🛟','🏐','🪣','🏖️'];
-    const emoji = Phaser.Utils.Array.GetRandom(emojis);
+  const emojis = ['🩴','🛟','🏐','🪣','🏖️'];
+  const emoji = Phaser.Utils.Array.GetRandom(emojis);
 
-    const proj = this.add.text(this.bossSprite.x, this.bossSprite.y, emoji, {
-      fontFamily:FONT, fontSize: 26
-    }).setOrigin(0.5);
-    this.physics.add.existing(proj);
-    proj.body.setCircle(18).setOffset(-18,-18);
+  const proj = this.add.text(this.bossSprite.x, this.bossSprite.y, emoji, {
+    fontFamily:FONT, fontSize: 26
+  }).setOrigin(0.5);
+  this.physics.add.existing(proj);
+  proj.body.setCircle(18).setOffset(-18,-18);
+  proj.body.setAllowGravity(false);
 
-    // direzione verso il player
-    const dx = this.player.x - this.bossSprite.x;
-    const dy = this.player.y - this.bossSprite.y;
-    const dist = Math.hypot(dx,dy) || 1;
-    const speed = 220;
+  // direzione verso il player
+  const dx = this.player.x - this.bossSprite.x;
+  const dy = this.player.y - this.bossSprite.y;
+  const dist = Math.hypot(dx,dy) || 1;
+  const speed = 220;
 
-    proj.body.setVelocity((dx/dist)*speed, (dy/dist)*speed);
-    this.bossProjectiles.add(proj);
-  }
+  // salviamo le velocità "a mano"
+  proj._vx = (dx/dist)*speed;
+  proj._vy = (dy/dist)*speed;
+
+  this.bossProjectiles.add(proj);
+}
 
   // --- LOGICA SPARO PLAYER (💩) ---
-  shootPoop(){
-    const now = this.time.now;
-    if (this._lastPoop && now < this._lastPoop + 220) return;
-    this._lastPoop = now;
+ shootPoop(){
+  const now = this.time.now;
+  if (this._lastPoop && now < this._lastPoop + 220) return;
+  this._lastPoop = now;
 
-    const proj = this.add.text(this.player.x, this.player.y, '💩', {
-      fontFamily:FONT, fontSize: 22
-    }).setOrigin(0.5);
-    this.physics.add.existing(proj);
-    proj.body.setCircle(14).setOffset(-14,-14);
+  const proj = this.add.text(this.player.x, this.player.y, '💩', {
+    fontFamily:FONT, fontSize: 22
+  }).setOrigin(0.5);
+  this.physics.add.existing(proj);
+  proj.body.setCircle(14).setOffset(-14,-14);
+  proj.body.setAllowGravity(false);
 
-    const dx = this.bossSprite.x - this.player.x;
-    const dy = this.bossSprite.y - this.player.y;
-    const dist = Math.hypot(dx,dy) || 1;
-    const speed = 260;
+  const dx = this.bossSprite.x - this.player.x;
+  const dy = this.bossSprite.y - this.player.y;
+  const dist = Math.hypot(dx,dy) || 1;
+  const speed = 260;
 
-    proj.body.setVelocity((dx/dist)*speed, (dy/dist)*speed);
-    this.playerProjectiles.add(proj);
+  proj._vx = (dx/dist)*speed;
+  proj._vy = (dy/dist)*speed;
 
-    SFX.drop();
-  }
+  this.playerProjectiles.add(proj);
+  SFX.drop();
+}
 
   // --- BONUS: NARVALO ---
   useNarwhal(){
@@ -1033,21 +1039,28 @@ if (GameState.poopMeter <= 0 && this.poops.countActive(true) === 0){
     this.btnCrab.setStyle({ backgroundColor:'#555' });
 
     // 3 granchi che caricano il bagnino come mini-cacche
-    for (let i=0;i<3;i++){
-      const crab = this.add.text(40 + i*30, this.scale.height - 70, '🦀', {
-        fontFamily:FONT, fontSize: 22
-      }).setOrigin(0.5);
-      this.physics.add.existing(crab);
-      crab.body.setCircle(14).setOffset(-14,-14);
+   // 3 granchi che caricano il bagnino come mini-cacche
+for (let i=0;i<3;i++){
+  const crab = this.add.text(40 + i*30, this.scale.height - 70, '🦀', {
+    fontFamily:FONT, fontSize: 22
+  }).setOrigin(0.5);
+  this.physics.add.existing(crab);
+  crab.body.setCircle(14).setOffset(-14,-14);
+  crab.body.setAllowGravity(false);
 
-      const dx = this.bossSprite.x - crab.x;
-      const dy = this.bossSprite.y - crab.y;
-      const dist = Math.hypot(dx,dy) || 1;
-      const speed = 260;
+  const dx = this.bossSprite.x - crab.x;
+  const dy = this.bossSprite.y - crab.y;
+  const dist = Math.hypot(dx,dy) || 1;
+  const speed = 260;
 
-      crab.body.setVelocity((dx/dist)*speed, (dy/dist)*speed);
-      this.playerProjectiles.add(crab);
-    }
+  crab._vx = (dx/dist)*speed;
+  crab._vy = (dy/dist)*speed;
+
+  this.playerProjectiles.add(crab);
+}
+
+SFX.crab();
+
 
     SFX.crab();
   }

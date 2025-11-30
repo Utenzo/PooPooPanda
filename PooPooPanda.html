@@ -784,35 +784,382 @@ if (GameState.poopMeter <= 0 && this.poops.countActive(true) === 0){
     }
     updateStatusTexts(){ /* placeholder se servisse aggiornare testi subito */ }
   }
-    class BossScene extends Phaser.Scene {
-    constructor(){ super('BossScene'); }
+   class BossScene extends Phaser.Scene {
+  constructor(){ super('BossScene'); }
 
-    create(){
-      const { width, height } = this.scale;
-      this.cameras.main.setBackgroundColor('#102131');
+  create(){
+    const { width, height } = this.scale;
+    this.cameras.main.setBackgroundColor('#102131');
 
-      this.add.text(width/2, height/2 - 40, 'Livello finale: Bagnino Boss 🛟',
-        { fontFamily: FONT, fontSize: 26, color:'#ffffff', align:'center', wordWrap:{ width: Math.min(600, width-40) } }
-      ).setOrigin(0.5);
+    // --- STATI VITA (0..1) ---
+    this.playerHp = 1;
+    this.bossHp   = 1;
 
-      this.add.text(width/2, height/2 + 10,
-        'Placeholder: nella prossima versione qui combatterai contro il bagnino!\n(Per ora puoi solo concludere la partita.)',
-        { fontFamily: FONT, fontSize: 16, color:'#cfd8dc', align:'center', wordWrap:{ width: Math.min(620, width-40) } }
-      ).setOrigin(0.5);
+    // --- SFONDO SEMPLICE SPIAGGIA/MARE ---
+    const bg = this.add.graphics();
+    bg.fillStyle(0x0b3d91,1); bg.fillRect(0,0,width,height*0.35);      // cielo
+    bg.fillStyle(0x1976d2,1); bg.fillRect(0,height*0.35,width,height*0.25); // mare
+    bg.fillStyle(0xf4e2b5,1); bg.fillRect(0,height*0.60,width,height*0.40); // sabbia
 
-      // Pulsante per concludere provvisoriamente andando alla schermata di vittoria attuale
-      const btn = this.add.text(width/2, height - 60, '▶ Concludi (provvisorio)',
-        { fontFamily: FONT, fontSize: 22, color:'#ffffff', backgroundColor:'#2e7d32',
-          padding:{ left:16, right:16, top:8, bottom:8 } }
-      ).setOrigin(0.5).setInteractive({ useHandCursor:true });
+    // --- PLAYER ---
+    const key = `char_${GameState.selected.specie}_${GameState.selected.eta}_${GameState.selected.genere}`;
+    if (!this.textures.exists(key)) createCharacterTexture(this, key, GameState.selected);
 
-      btn.on('pointerdown', ()=>{
-        resetForNewRun();
-        this.scene.start('WinScene');
-      });
+    this.player = this.add.image(width*0.2, height*0.7, key);
+    this.physics.add.existing(this.player);
+    this.player.body.setCircle(this.player.displayWidth/2);
+    this.player.body.setCollideWorldBounds(true);
+
+    this.playerLimbs = makeLimbs(this, 0x000000);
+
+    // --- BOSS (BAGNINO) ---
+    const lifekey = 'lifeguard_tex';
+    if (!this.textures.exists(lifekey)) createLifeguardTexture(this, lifekey);
+    this.bossSprite = this.add.image(width*0.75, height*0.45, lifekey);
+    this.physics.add.existing(this.bossSprite);
+    this.bossSprite.body.setCircle(this.bossSprite.displayWidth/2);
+    this.bossSprite.body.setImmovable(true);
+
+    this.bossFrozenUntil = 0;
+    this.lastBossShot = 0;
+    this.bossShotInterval = 1400; // ms
+
+    // --- PROIETTILI ---
+    this.playerProjectiles = this.physics.add.group();
+    this.bossProjectiles   = this.physics.add.group();
+
+    // --- BONUS DISPONIBILI DAL MARE ---
+    this.canUseNarwhal = !!GameState.hasNarwhal;
+    this.canUseSiren   = !!GameState.hasSiren;
+    this.canUseTornado = !!GameState.hasTornado;
+    this.canUseCrabs   = !!GameState.crabsFriendly; // qui diventano attacco speciale
+
+    // Li consideriamo "consumati" a prescindere dopo questo livello
+    GameState.hasNarwhal = false;
+    GameState.hasSiren   = false;
+    GameState.hasTornado = false;
+    GameState.crabsFriendly = false;
+
+    // --- UI BARRE VITA ---
+    this.ui = this.add.graphics();
+    this.playerHpText = this.add.text(16, 12, '', { fontFamily:FONT, fontSize: 14, color:'#ffffff' });
+    this.bossHpText   = this.add.text(width-16, 12, '', { fontFamily:FONT, fontSize: 14, color:'#ffffff' }).setOrigin(1,0);
+
+    // Istruzioni
+    this.infoText = this.add.text(width/2, 52,
+      'Ultimo livello! Evita gli oggetti del bagnino, lancia 💩 e usa i bonus rimasti!',
+      { fontFamily:FONT, fontSize: 16, color:'#e3f2fd', align:'center', wordWrap:{ width: Math.min(700, width-40) } }
+    ).setOrigin(0.5);
+
+    // Pulsanti testo bonus (solo visivi, la logica è via tastiera)
+    const bottomY = height - 50;
+    this.btnPoop = this.add.text(16, bottomY, 'Spara 💩 (SPAZIO)', {
+      fontFamily:FONT, fontSize:18, color:'#ffffff', backgroundColor:'#a34a00',
+      padding:{left:10,right:10,top:6,bottom:6}
+    });
+
+    let xCursor = 260;
+    this.btnNar = this.add.text(xCursor, bottomY, 'Narvalo 🐋 (N)', {
+      fontFamily:FONT, fontSize:18, color:'#ffffff',
+      backgroundColor:this.canUseNarwhal ? '#6a1b9a' : '#555',
+      padding:{left:10,right:10,top:6,bottom:6}
+    }); xCursor += 170;
+
+    this.btnSir = this.add.text(xCursor, bottomY, 'Sirena 🧜‍♀️ (S)', {
+      fontFamily:FONT, fontSize:18, color:'#ffffff',
+      backgroundColor:this.canUseSiren ? '#2947a3' : '#555',
+      padding:{left:10,right:10,top:6,bottom:6}
+    }); xCursor += 170;
+
+    this.btnTor = this.add.text(xCursor, bottomY, 'Tornado 🌀 (T)', {
+      fontFamily:FONT, fontSize:18, color:'#ffffff',
+      backgroundColor:this.canUseTornado ? '#00695c' : '#555',
+      padding:{left:10,right:10,top:6,bottom:6}
+    }); xCursor += 170;
+
+    this.btnCrab = this.add.text(xCursor, bottomY, 'Granchi 🦀 (C)', {
+      fontFamily:FONT, fontSize:18, color:'#ffffff',
+      backgroundColor:this.canUseCrabs ? '#8B4513' : '#555',
+      padding:{left:10,right:10,top:6,bottom:6}
+    });
+
+    // --- TORNADO VISIVO ---
+    this.tornadoUntil = 0;
+    this.tornadoGfx = this.add.graphics();
+
+    // --- INPUT ---
+    this.cursors = this.input.keyboard.createCursorKeys();
+    this.wasd = this.input.keyboard.addKeys('W,A,S,D');
+    this.keySpace = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+    this.keyN = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.N);
+    this.keyS = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S);
+    this.keyT = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.T);
+    this.keyC = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.C);
+
+    this.pointerTarget = null;
+    this.pointerMarker = this.add.circle(0,0,8,0x000000,0.3).setVisible(false);
+    const setPointerTarget = (p)=>{
+      this.pointerTarget = { x:p.worldX, y:p.worldY };
+      this.pointerMarker.setPosition(this.pointerTarget.x, this.pointerTarget.y).setVisible(true);
+    };
+    this.input.on('pointerdown', setPointerTarget);
+    this.input.on('pointermove', (p)=>{ if (p.isDown) setPointerTarget(p); });
+
+    // --- COLLISIONI ---
+    this.physics.add.overlap(this.player, this.bossProjectiles, this.onPlayerHit, null, this);
+    this.physics.add.overlap(this.bossSprite, this.playerProjectiles, this.onBossHit, null, this);
+
+    // --- HUD iniziale ---
+    this.updateHud();
+  }
+
+  // --- HUD ---
+  updateHud(){
+    const { width } = this.scale;
+    const barW = (width/2) - 40, barH = 20;
+
+    this.ui.clear();
+    // barra player (sinistra)
+    drawProgressBar(this.ui, 16, 32, barW, barH, this.playerHp, 0x4caf50);
+    // barra boss (destra)
+    drawProgressBar(this.ui, width - barW - 16, 32, barW, barH, this.bossHp, 0xe53935);
+
+    this.playerHpText.setText(`Vita: ${Math.round(this.playerHp*100)}%`);
+    this.bossHpText.setText(`Vita bagnino: ${Math.round(this.bossHp*100)}%`);
+  }
+
+  // --- LOGICA SPARO BOSS ---
+  bossShoot(time){
+    if (time < this.lastBossShot + this.bossShotInterval) return;
+    if (time < this.bossFrozenUntil) return;
+
+    this.lastBossShot = time;
+
+    const emojis = ['🩴','🛟','🏐','🪣','🏖️'];
+    const emoji = Phaser.Utils.Array.GetRandom(emojis);
+
+    const proj = this.add.text(this.bossSprite.x, this.bossSprite.y, emoji, {
+      fontFamily:FONT, fontSize: 26
+    }).setOrigin(0.5);
+    this.physics.add.existing(proj);
+    proj.body.setCircle(18).setOffset(-18,-18);
+
+    // direzione verso il player
+    const dx = this.player.x - this.bossSprite.x;
+    const dy = this.player.y - this.bossSprite.y;
+    const dist = Math.hypot(dx,dy) || 1;
+    const speed = 220;
+
+    proj.body.setVelocity((dx/dist)*speed, (dy/dist)*speed);
+    this.bossProjectiles.add(proj);
+  }
+
+  // --- LOGICA SPARO PLAYER (💩) ---
+  shootPoop(){
+    const now = this.time.now;
+    if (this._lastPoop && now < this._lastPoop + 220) return;
+    this._lastPoop = now;
+
+    const proj = this.add.text(this.player.x, this.player.y, '💩', {
+      fontFamily:FONT, fontSize: 22
+    }).setOrigin(0.5);
+    this.physics.add.existing(proj);
+    proj.body.setCircle(14).setOffset(-14,-14);
+
+    const dx = this.bossSprite.x - this.player.x;
+    const dy = this.bossSprite.y - this.player.y;
+    const dist = Math.hypot(dx,dy) || 1;
+    const speed = 260;
+
+    proj.body.setVelocity((dx/dist)*speed, (dy/dist)*speed);
+    this.playerProjectiles.add(proj);
+
+    SFX.drop();
+  }
+
+  // --- BONUS: NARVALO ---
+  useNarwhal(){
+    if (!this.canUseNarwhal) return;
+    this.canUseNarwhal = false;
+    this.btnNar.setStyle({ backgroundColor:'#555' });
+
+    // Effetto: mangia TUTTI i proiettili del bagnino
+    this.add.text(this.player.x, this.player.y - 40, '🐋', {
+      fontFamily:FONT, fontSize: 30
+    }).setOrigin(0.5);
+
+    this.bossProjectiles.getChildren().forEach(p=>p.destroy());
+    SFX.narwhal();
+  }
+
+  // --- BONUS: SIRENA ---
+  useSiren(){
+    if (!this.canUseSiren) return;
+    this.canUseSiren = false;
+    this.btnSir.setStyle({ backgroundColor:'#555' });
+
+    this.bossFrozenUntil = this.time.now + 6000; // 6 secondi
+    const sir = this.add.text(this.bossSprite.x, this.bossSprite.y - 60, '🧜‍♀️', {
+      fontFamily:FONT, fontSize: 26
+    }).setOrigin(0.5);
+
+    this.tweens.add({
+      targets:sir,
+      y: sir.y - 20,
+      alpha: 0,
+      duration: 1500,
+      onComplete:()=> sir.destroy()
+    });
+
+    SFX.siren();
+  }
+
+  // --- BONUS: GRANCHI ---
+  useCrabs(){
+    if (!this.canUseCrabs) return;
+    this.canUseCrabs = false;
+    this.btnCrab.setStyle({ backgroundColor:'#555' });
+
+    // 3 granchi che caricano il bagnino come mini-cacche
+    for (let i=0;i<3;i++){
+      const crab = this.add.text(40 + i*30, this.scale.height - 70, '🦀', {
+        fontFamily:FONT, fontSize: 22
+      }).setOrigin(0.5);
+      this.physics.add.existing(crab);
+      crab.body.setCircle(14).setOffset(-14,-14);
+
+      const dx = this.bossSprite.x - crab.x;
+      const dy = this.bossSprite.y - crab.y;
+      const dist = Math.hypot(dx,dy) || 1;
+      const speed = 260;
+
+      crab.body.setVelocity((dx/dist)*speed, (dy/dist)*speed);
+      this.playerProjectiles.add(crab);
+    }
+
+    SFX.crab();
+  }
+
+  // --- BONUS: TORNADO ---
+  useTornado(){
+    if (!this.canUseTornado) return;
+    this.canUseTornado = false;
+    this.btnTor.setStyle({ backgroundColor:'#555' });
+
+    this.tornadoUntil = this.time.now + 5000; // 5 secondi
+    SFX.tornado();
+  }
+
+  // --- COLLISIONI ---
+  onPlayerHit(player, projectile){
+    projectile.destroy();
+    this.playerHp = Math.max(0, this.playerHp - 0.18);
+    this.updateHud();
+    if (this.playerHp <= 0){
+      this.endLose();
+    } else {
+      SFX.wrong();
     }
   }
 
+  onBossHit(boss, projectile){
+    projectile.destroy();
+    this.bossHp = Math.max(0, this.bossHp - 0.12);
+    this.updateHud();
+    if (this.bossHp <= 0){
+      this.endWin();
+    } else {
+      SFX.eat();
+    }
+  }
+
+  endWin(){
+    SFX.win();
+    resetForNewRun();
+    this.scene.start('WinScene');
+  }
+
+  endLose(){
+    SFX.lose();
+    resetForNewRun();
+    this.scene.start('LoseScene', { reason:'boss' });
+  }
+
+  update(time, delta){
+    const dt = delta/1000;
+    const { width, height } = this.scale;
+    const body = this.player.body;
+    body.setVelocity(0);
+
+    const speed = 180;
+
+    // movimento tastiera
+    if (this.cursors.left.isDown || this.wasd.A.isDown) body.setVelocityX(-speed);
+    else if (this.cursors.right.isDown || this.wasd.D.isDown) body.setVelocityX(speed);
+
+    if (this.cursors.up.isDown || this.wasd.W.isDown) body.setVelocityY(-speed);
+    else if (this.cursors.down.isDown || this.wasd.S.isDown) body.setVelocityY(speed);
+
+    // movimento touch/click
+    if (this.pointerTarget){
+      const dx = this.pointerTarget.x - this.player.x;
+      const dy = this.pointerTarget.y - this.player.y;
+      const dist = Math.hypot(dx,dy);
+      if (dist > 6){
+        body.setVelocity((dx/dist)*speed, (dy/dist)*speed);
+      } else {
+        this.pointerTarget = null;
+        this.pointerMarker.setVisible(false);
+      }
+    }
+
+    // sparo player
+    if (Phaser.Input.Keyboard.JustDown(this.keySpace)){
+      this.shootPoop();
+    }
+
+    // bonus input
+    if (Phaser.Input.Keyboard.JustDown(this.keyN)) this.useNarwhal();
+    if (Phaser.Input.Keyboard.JustDown(this.keyS)) this.useSiren();
+    if (Phaser.Input.Keyboard.JustDown(this.keyT)) this.useTornado();
+    if (Phaser.Input.Keyboard.JustDown(this.keyC)) this.useCrabs();
+
+    // sparo boss
+    this.bossShoot(time);
+
+    // effetto tornado: allontana i proiettili del bagnino dal player
+    this.tornadoGfx.clear();
+    if (time < this.tornadoUntil){
+      this.tornadoGfx.lineStyle(2, 0x00695c, 0.9);
+      this.tornadoGfx.strokeCircle(this.player.x, this.player.y, 40);
+      this.tornadoGfx.strokeCircle(this.player.x, this.player.y, 24);
+
+      this.bossProjectiles.getChildren().forEach(p=>{
+        const dx = p.x - this.player.x;
+        const dy = p.y - this.player.y;
+        const dist = Math.hypot(dx,dy) || 1;
+        const speed = 260;
+        p.body.setVelocity((dx/dist)*speed, (dy/dist)*speed);
+      });
+    }
+
+    // cleanup proiettili fuori schermo
+    this.playerProjectiles.getChildren().forEach(p=>{
+      if (p.x < -40 || p.x > width+40 || p.y < -40 || p.y > height+40) p.destroy();
+    });
+    this.bossProjectiles.getChildren().forEach(p=>{
+      if (p.x < -40 || p.x > width+40 || p.y < -40 || p.y > height+40) p.destroy();
+    });
+
+    // animazione arti player
+    const moving = body.velocity.length() > 5;
+    updateLimbs(this.playerLimbs, this.player.x, this.player.y, moving, time/1000);
+  }
+
+  shutdown(){
+    this.playerLimbs?.destroy?.();
+  }
+}
 
   class LoseScene extends Phaser.Scene {
     constructor(){ super('LoseScene'); }
@@ -838,7 +1185,7 @@ if (GameState.poopMeter <= 0 && this.poops.countActive(true) === 0){
       const { width, height } = this.scale;
       this.cameras.main.setBackgroundColor('#1b5e20');
       this.add.text(width/2, height/2 - 40, 'Ce l\'hai fatta! 🤫🌊', { fontFamily:FONT, fontSize: 28, color:'#ffffff' }).setOrigin(0.5);
-      this.add.text(width/2, height/2 + 10, 'Nessuno ha scoperto nulla. Bravo stratega!', { fontFamily:FONT, fontSize: 16, color:'#e8f5e9' }).setOrigin(0.5);
+      this.add.text(width/2, height/2 + 10, 'Nessuno ha scoperto nulla e hai sconfitto il boss finale! Bravo stratega!', { fontFamily:FONT, fontSize: 16, color:'#e8f5e9' }).setOrigin(0.5);
       this.add.text(width/2 - 130, height - 60, '⬅ Menu', { fontFamily:FONT, fontSize:22, color:'#fff', backgroundColor:'#2e7d32', padding:{left:10,right:10,top:6,bottom:6} }).setOrigin(0.5).setInteractive({useHandCursor:true}).on('pointerdown', ()=>{ resetForNewRun(); this.scene.start('MenuScene'); });
       this.add.text(width/2 + 130, height - 60, '⟲ Gioca ancora', { fontFamily:FONT, fontSize:22, color:'#fff', backgroundColor:'#2e7d32', padding:{left:10,right:10,top:6,bottom:6} }).setOrigin(0.5).setInteractive({useHandCursor:true}).on('pointerdown', ()=>{ resetForNewRun(); this.scene.start('LandScene'); });
     }

@@ -486,11 +486,16 @@
       this.lifeguardSprite = this.add.image(width/2, this.beachTopY - 20, lifekey);
 
       this.lifeguard = {
-        x: this.lifeguardSprite.x, y: this.lifeguardSprite.y,
-        dir: Math.PI/2, sweepMin: Math.PI/2 - Phaser.Math.DegToRad(35), sweepMax: Math.PI/2 + Phaser.Math.DegToRad(35),
-        speed: Phaser.Math.DegToRad(20), fov: Phaser.Math.DegToRad(50), range: 360, distractedUntil: 0
-      };
-
+  x: this.lifeguardSprite.x, 
+  y: this.lifeguardSprite.y,
+  dir: -Math.PI/2,
+  sweepMin: -Math.PI/2 - Phaser.Math.DegToRad(35),
+  sweepMax: -Math.PI/2 + Phaser.Math.DegToRad(35),
+  speed: Phaser.Math.DegToRad(20),
+  fov: Phaser.Math.DegToRad(50),
+  range: 360,
+  distractedUntil: 0
+};
       this.visionGfx = this.add.graphics();
 
       // Nuotatori in mare

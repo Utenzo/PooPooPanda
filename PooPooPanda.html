@@ -1589,16 +1589,65 @@ class BossScene extends Phaser.Scene {
 
 
   class WinScene extends Phaser.Scene {
-    constructor(){ super('WinScene'); }
-    create(){
-      const { width, height } = this.scale;
-      this.cameras.main.setBackgroundColor('#1b5e20');
-      this.add.text(width/2, height/2 - 40, 'Ce l\'hai fatta! 🤫🌊', { fontFamily:FONT, fontSize: 28, color:'#ffffff' }).setOrigin(0.5);
-      this.add.text(width/2, height/2 + 10, 'Nessuno ha scoperto nulla e hai sconfitto il boss finale! Bravo stratega!', { fontFamily:FONT, fontSize: 16, color:'#e8f5e9' }).setOrigin(0.5);
-      this.add.text(width/2 - 130, height - 60, '⬅ Menu', { fontFamily:FONT, fontSize:22, color:'#fff', backgroundColor:'#2e7d32', padding:{left:10,right:10,top:6,bottom:6} }).setOrigin(0.5).setInteractive({useHandCursor:true}).on('pointerdown', ()=>{ resetForNewRun(); this.scene.start('MenuScene'); });
-      this.add.text(width/2 + 130, height - 60, '⟲ Gioca ancora', { fontFamily:FONT, fontSize:22, color:'#fff', backgroundColor:'#2e7d32', padding:{left:10,right:10,top:6,bottom:6} }).setOrigin(0.5).setInteractive({useHandCursor:true}).on('pointerdown', ()=>{ resetForNewRun(); this.scene.start('LandScene'); });
-    }
+  constructor(){ super('WinScene'); }
+  create(){
+    const { width, height } = this.scale;
+    this.cameras.main.setBackgroundColor('#1b5e20');
+
+    this.add.text(
+      width/2,
+      height/2 - 40,
+      'Ce l\'hai fatta! 🤫🌊',
+      { fontFamily:FONT, fontSize: 28, color:'#ffffff' }
+    ).setOrigin(0.5);
+
+    this.add.text(
+      width/2,
+      height/2 + 10,
+      'Nessuno ha scoperto nulla e hai sconfitto il boss finale! Bravo stratega!',
+      { fontFamily:FONT, fontSize: 16, color:'#e8f5e9' }
+    ).setOrigin(0.5);
+
+    this.add.text(
+      width/2 - 130,
+      height - 60,
+      '⬅ Menu',
+      {
+        fontFamily:FONT,
+        fontSize:22,
+        color:'#fff',
+        backgroundColor:'#2e7d32',
+        padding:{left:10,right:10,top:6,bottom:6}
+      }
+    )
+    .setOrigin(0.5)
+    .setInteractive({useHandCursor:true})
+    .on('pointerdown', ()=>{
+      resetForNewRun();
+      this.scene.start('MenuScene');
+    });
+
+    this.add.text(
+      width/2 + 130,
+      height - 60,
+      '⟲ Gioca ancora',
+      {
+        fontFamily:FONT,
+        fontSize:22,
+        color:'#fff',
+        backgroundColor:'#2e7d32',
+        padding:{left:10,right:10,top:6,bottom:6}
+      }
+    )
+    .setOrigin(0.5)
+    .setInteractive({useHandCursor:true})
+    .on('pointerdown', ()=>{
+      resetForNewRun();
+      this.scene.start('LandScene');
+    });
   }
+}
+
 
   // ========== BOOT ==========
   function setupAudioUnlock(){

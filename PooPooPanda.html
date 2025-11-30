@@ -38,6 +38,7 @@
 
   const Phaser = window.Phaser;
   const FONT = "Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji, Arial, sans-serif";
+const GAME_VERSION = "v1.1.0 - Boss Bagnino";
 
   // ========== DOMAIN ==========
   const Characters = {
@@ -327,6 +328,17 @@
           const chosen = options[selectedIdx].value; GameState.selected = { specie: chosen.specie, eta: chosen.eta, genere: gender };
           this.scene.start('LandScene');
         });
+		// Versione in basso a destra
+this.add.text(
+  width - 10,
+  height - 10,
+  `Versione ${GAME_VERSION}`,
+  {
+    fontFamily: FONT,
+    fontSize: 14,
+    color: "#eeeeee"
+  }
+).setOrigin(1, 1).setAlpha(0.8);
     }
   }
 
